@@ -84,6 +84,7 @@ The easiest way to get etcd is to use one of the pre-built release binaries whic
 
 For more installation guides, please check out [play.etcd.io](http://play.etcd.io) and [operating etcd](https://etcd.io/docs/latest/op-guide).
 
+直接在根目录执行 `./build` 会在bin目录生成`etcd etcdctl etcdutl`三个可执行文件
 For those wanting to try the very latest version, [build the latest version of etcd][dl-build] from the `main` branch. This first needs [*Go*](https://golang.org/) installed ([version 1.16+](/go.mod#L3) is required). All development occurs on `main`, including new features and bug fixes. Bug fixes are first targeted at `main` and subsequently ported to release branches, as described in the [branch management][branch-management] guide.
 
 [github-release]: https://github.com/etcd-io/etcd/releases

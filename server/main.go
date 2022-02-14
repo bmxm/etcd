@@ -27,7 +27,9 @@ import (
 
 	"go.etcd.io/etcd/server/v3/etcdmain"
 )
-
+// 默认监听两个端口
+// 2379 用于与客户端交互
+// 2380 用于与etcd节点内部交互
 func main() {
 	etcdmain.Main(os.Args)
 }

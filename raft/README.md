@@ -1,5 +1,8 @@
 # Raft library
 
+- raft : 只实现了基本的Raft协议，并未提供实现网络层相关的内容？
+- raft-http : 协议中各个节点发送消息时使用的网络层实现
+
 Raft is a protocol with which a cluster of nodes can maintain a replicated state machine.
 The state machine is kept in sync through the use of a replicated log.
 For more details on Raft, see "In Search of an Understandable Consensus Algorithm"

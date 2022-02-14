@@ -64,3 +64,5 @@ func TestMain(m *testing.M) {
 	os.Args = testArgs
 	m.Run()
 }
+
+//  etcdctl --endpoints=etcd.etcd-dev:2379 --user root:xxx get m

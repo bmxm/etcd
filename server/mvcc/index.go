@@ -38,6 +38,7 @@ type index interface {
 	KeyIndex(ki *keyIndex) *keyIndex
 }
 
+// treeIndex 中，每个节点的 key 是一个 keyIndex 结构，etcd 通过它保存了key 与版本号的映射关系。
 type treeIndex struct {
 	sync.RWMutex
 	tree *btree.BTree

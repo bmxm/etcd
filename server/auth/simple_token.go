@@ -56,6 +56,8 @@ func (tm *simpleTokenTTLKeeper) stop() {
 	case tm.stopc <- struct{}{}:
 	case <-tm.donec:
 	}
+	// 如果通道别关闭，这里会接收到对应的零值
+	// 被关闭的通道不能被再次关闭和发送消息，但可以接收消息
 	<-tm.donec
 }
 

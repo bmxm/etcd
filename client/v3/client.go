@@ -42,12 +42,12 @@ var (
 
 // Client provides and manages an etcd v3 client session.
 type Client struct {
-	Cluster
-	KV
-	Lease
-	Watcher
-	Auth
-	Maintenance
+	Cluster // 向集群里增加etcd服务端节点之类，属于管理员操作
+	KV // 一个接口，也是我们主要使用的功能，即操作K-V
+	Lease // 租约相关操作，比如申请一个TTL=10秒的租约
+	Watcher // 观察订阅，从而监听最新的数据变化。
+	Auth // 管理etcd的用户和权限，属于管理员操作。
+	Maintenance // 维护etcd，比如主动迁移etcd的leader节点，属于管理员操作。
 
 	conn *grpc.ClientConn
 

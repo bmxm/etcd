@@ -27,6 +27,8 @@ var (
 	ErrRevisionNotFound = errors.New("mvcc: revision not found")
 )
 
+// 对etcd v2 来说，当你通过 etcdctl put值的时候，etcd v2 会直接刷新内存树，这就导致历史版本直接被覆盖，无法支持key的历史版本。
+// 在 etcd v3 中引入 treeIndex 模块正是为了解决这个问题，支持保存 key 的历史版本，提供稳定的 Watch 机制和事务隔离等能力
 // keyIndex stores the revisions of a key in the backend.
 // Each keyIndex has at least one key generation.
 // Each generation might have several key versions.
@@ -68,10 +70,20 @@ var (
 // generations:
 //    {empty} -> key SHOULD be removed.
 type keyIndex struct {
-	key         []byte
-	modified    revision // the main rev of the last modification
-	generations []generation
+	key         []byte // 用户的key名称
+	modified    revision // the main rev of the last modification 最后一次修改key时的etcd版本号
+	generations []generation // generation保存了一个key若干代版本号信息，每代中包含对key的多次修改的版本号列表
 }
+// 每个Key会对应多个generation，当Key首次创建的时候，会同时创建一个与之关联的generation实例
+// 当该Key被修改时，会将对应的版本记录到generation中
+// 当Key被删除时，会向 generation 中添加 bombstone，并创建新的generation，会向新generation中写入后续的版本信息
+
+// 在每次修改 key 时会生成一个全局递增的版本号（revision）
+// 然后通过数据结构 B-tree 保存用户 key 与版本号之间的关系
+// 再以版本号作为 boltdb key，以用户的 key-value 等信息作为 boltdb value，保存到 boltdb
+
+// !!!
+// boltdb 中只能通过reversion来查询数据,但是客户端都是通过 key 来查询的。所以 etcd 在内存中使用 treeIndex 模块 维护了一个kvindex,保存的就是 key-reversion 之间的映射关系，用来加速查询
 
 // put puts a revision to the keyIndex.
 func (ki *keyIndex) put(lg *zap.Logger, main int64, sub int64) {
@@ -333,9 +345,11 @@ func (ki *keyIndex) String() string {
 
 // generation contains multiple revisions of a key.
 type generation struct {
-	ver     int64
-	created revision // when the generation is created (put in first revision).
-	revs    []revision
+	ver     int64 //表示此key的修改次数
+	created revision // when the generation is created (put in first revision). 表示generation结构创建时的版本号
+	revs    []revision //每次修改key时的revision追加到此数组
+
+	// 版本号（revision）并不是一个简单的整数，而是一个结构体
 }
 
 func (g *generation) isEmpty() bool { return g == nil || len(g.revs) == 0 }

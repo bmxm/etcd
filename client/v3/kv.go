@@ -94,6 +94,7 @@ type kv struct {
 	callOpts []grpc.CallOption
 }
 
+// NewKV 但是我们并不是直接获取client.KV来使用，而是通过一个方法来获得一个经过装饰的KV实现（内置错误重试机制的高级KV）
 func NewKV(c *Client) KV {
 	api := &kv{remote: RetryKVClient(c)}
 	if c != nil {
