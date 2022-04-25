@@ -40,14 +40,19 @@ var (
 )
 
 var (
+	// rootCmd 代表没有调用子命令时的基础命令
 	rootCmd = &cobra.Command{
+		// 设置根命令为 etcdctl
 		Use:        cliName,
 		Short:      cliDescription,
 		SuggestFor: []string{"etcdctl"},
+		// 如果有相关的 action 要执行，请取消下面这行代码的注释
+		// Run: func(cmd *cobra.Command, args []string) { },
 	}
 )
 
 func init() {
+	// 标志是 "persistent" 的，意味着该标志将可用于分配给它的命令以及该命令下的每个命令。对于全局标志，将标志分配为根上的持久标志。
 	rootCmd.PersistentFlags().StringSliceVar(&globalFlags.Endpoints, "endpoints", []string{"127.0.0.1:2379"}, "gRPC endpoints")
 	rootCmd.PersistentFlags().BoolVar(&globalFlags.Debug, "debug", false, "enable client-side debug logging")
 
@@ -101,9 +106,13 @@ func usageFunc(c *cobra.Command) error {
 }
 
 func Start() error {
+	// 你可以提供你自己的 usage 函数或模板。像 help 一样，函数和模板可通过公共方法重写
 	rootCmd.SetUsageFunc(usageFunc)
 	// Make help just show the usage
 	rootCmd.SetHelpTemplate(`{{.UsageString}}`)
+
+	// 初始化应用
+	// 将所有子命令添加到root命令并适当设置标志
 	return rootCmd.Execute()
 }
 

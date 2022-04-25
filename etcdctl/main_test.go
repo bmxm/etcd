@@ -66,3 +66,4 @@ func TestMain(m *testing.M) {
 }
 
 //  etcdctl --endpoints=etcd.etcd-dev:2379 --user root:xxx get m
+//  etcdctl --endpoints etcd.etcd-dev:2379 --user root:xx get / --prefix --keys-only

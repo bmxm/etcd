@@ -209,3 +209,5 @@ These emeritus maintainers dedicated a part of their career to etcd and reviewed
 ### License
 
 etcd is under the Apache 2.0 license. See the [LICENSE](LICENSE) file for details.
+
+etcd 是典型的读多写少存储，在我们实际业务场景中，读一般占据 2/3 以上的请求。

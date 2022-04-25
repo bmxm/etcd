@@ -21,3 +21,4 @@ hack/tls-setup/certs
 *.tmp
 *.bak
 .gobincache/
+/etcdctl/etcdctl
