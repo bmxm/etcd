@@ -234,6 +234,7 @@ func (b *backend) ReadTx() ReadTx { return b.readTx }
 // ConcurrentReadTx creates and returns a new ReadTx, which:
 // A) creates and keeps a copy of backend.readTx.txReadBuffer,
 // B) references the boltdb read Tx (and its bucket cache) of current batch interval.
+//
 func (b *backend) ConcurrentReadTx() ReadTx {
 	b.readTx.RLock()
 	defer b.readTx.RUnlock()

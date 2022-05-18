@@ -330,6 +330,7 @@ func (a *applierV3backend) DeleteRange(txn mvcc.TxnWrite, dr *pb.DeleteRangeRequ
 }
 
 func (a *applierV3backend) Range(ctx context.Context, txn mvcc.TxnRead, r *pb.RangeRequest) (*pb.RangeResponse, error) {
+
 	trace := traceutil.Get(ctx)
 
 	resp := &pb.RangeResponse{}

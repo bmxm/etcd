@@ -211,3 +211,23 @@ These emeritus maintainers dedicated a part of their career to etcd and reviewed
 etcd is under the Apache 2.0 license. See the [LICENSE](LICENSE) file for details.
 
 etcd 是典型的读多写少存储，在我们实际业务场景中，读一般占据 2/3 以上的请求。
+
+起源，CoreOS 团队需要一个协调服务来存储服务配置信息，提供分布式锁等能力。
+单副本存在单点故障，多副本又会引入数据一致性的问题。
+Raft 将一致性问题分解为 Leader选举、日志同步、安全性三个相对独立的子问题，只要集群一半以上的节点存活就可以提供服务。
+存储引擎上，Zookeeper 使用的是 Concurrent HashMap, 而 etcd 使用的是简单内存树。
+v 0.1 实现了简单的增删改查，但读数据一致性无法保证。
+v 0.2 支持通过指定 consistent 模式，从 Leader 读取数据，并将 Test And Set 机制修正为 CAS(Compare And Swap),解决了原子更新的问题。
+
+当使用 Kubernetes 声明式 API 部署服务时， Kubernetes 的控制器通过 etcd Watch 机制，会实时监听资源的变化事件，对比实际状态与期望状态是否一致，并采取协调动作使其一致。
+k8s 更新数据的时候，通过 CAS 机制保证并发场景下的原子更新，并通过对 key 设置 TTL 来存储 Event 事件，提升 k8s 集群的可观测性，基于 TTL 特性，Event 事件 key 到期后可自动删除。
+
+etcd v2 
+1. 不支持范围查询和分页。
+2. 不支持多 key 事务。
+3. 内存型、不支持保存 key 历史版本的数据库，只在内存中使用滑动窗口保存了最近的1000条变更事件。
+
+HTTP/1.x API 没有压缩机制，批量拉取较多的Pod时容易导致 APIServer 和 etcd 出现 CPU 高负载、OOM、丢包等问题。
+
+redis 主备异步复制，可能丢数据，集群版本可以承载上T数据。
+etcd 使用raft保证读写一致性，性能和redis差距较大，db大小一般不超过8g.

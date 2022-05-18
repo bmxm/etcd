@@ -50,6 +50,9 @@ func mainWithError() error {
 	return fmt.Errorf("unsupported API version: %s", apiv)
 }
 
+// ./bin/etcdctl get hello
+// 等同于 => go run main.go get hello
+// 等同于 => go run main.go get hello --endpoints http://127.0.0.1:2379
 func main() {
 	apiv := os.Getenv(apiEnv)
 

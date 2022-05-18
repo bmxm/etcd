@@ -117,6 +117,10 @@ func (kv *kv) Put(ctx context.Context, key, val string, opts ...OpOption) (*PutR
 }
 
 func (kv *kv) Get(ctx context.Context, key string, opts ...OpOption) (*GetResponse, error) {
+	// 如果执行的是 ./bin/etcdctl get hello
+	// 则 这里的 key = hello
+
+	// 指定 t == tRange
 	r, err := kv.Do(ctx, OpGet(key, opts...))
 	return r.get, toErr(ctx, err)
 }

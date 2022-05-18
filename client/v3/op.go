@@ -222,6 +222,8 @@ func OpGet(key string, opts ...OpOption) Op {
 	if IsOptsWithPrefix(opts) && IsOptsWithFromKey(opts) {
 		panic("`WithPrefix` and `WithFromKey` cannot be set at the same time, choose one")
 	}
+
+	// 将字符串 转 byte ?
 	ret := Op{t: tRange, key: []byte(key)}
 	ret.applyOpts(opts)
 	return ret

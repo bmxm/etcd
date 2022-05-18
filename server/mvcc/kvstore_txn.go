@@ -35,6 +35,17 @@ type storeTxnRead struct {
 	trace *traceutil.Trace
 }
 
+// MVCC : 主要由 内存树形索引模块（treeIndex）和嵌入式的 KV 持久化存储库 boltdb 组成。
+// boltdb 是一个基于 B+ tree 实现的 key-value 键值库，支持事务，提供 Get/Put 等简易
+// API 给 etcd 操作。
+
+// 多个历史版本：
+// 每次修改操作，生成一个新的版本号（revision）,以版本号为 Key, value 为用户 key-value
+// 等信息组成的结构体。
+// 读事务：
+// 1. 从 treeIndex 中获取 key hello 的版本号，
+// 2. 根据版本号作为 boltdb 的 key,从 boltdb(先查询buffer) 中获取其 value 信息
+
 func (s *store) Read(mode ReadTxMode, trace *traceutil.Trace) TxnRead {
 	s.mu.RLock()
 	s.revMu.RLock()

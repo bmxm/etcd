@@ -17,7 +17,6 @@ package v3rpc
 
 import (
 	"context"
-
 	pb "go.etcd.io/etcd/api/v3/etcdserverpb"
 	"go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
 	"go.etcd.io/etcd/pkg/v3/adt"
@@ -39,10 +38,14 @@ func NewKVServer(s *etcdserver.EtcdServer) pb.KVServer {
 }
 
 func (s *kvServer) Range(ctx context.Context, r *pb.RangeRequest) (*pb.RangeResponse, error) {
+	// 如果执行的是 ./bin/etcdctl get hello
+	// 则 这里的 string(r.Key) = hello
+
 	if err := checkRangeRequest(r); err != nil {
 		return nil, err
 	}
 
+	// 这里执行的是 v3_server.go 中的 EtcdServer 对象的 Range 方法
 	resp, err := s.kv.Range(ctx, r)
 	if err != nil {
 		return nil, togRPCError(err)

@@ -171,6 +171,20 @@ func mustClientCfgFromCmd(cmd *cobra.Command) *clientv3.Config {
 }
 
 func mustClientFromCmd(cmd *cobra.Command) *clientv3.Client {
+	// etcdctl 是通过 clientv3 库来访问 etcd server 的
+	// clientv3 库基于 gRPC client API 封装了操作 etcd KVServer、Cluster、Auth、Lease、Watch 等模块的 API
+	// 同时还包含了负载均衡、健康探测和故障切换等特性。
+
+	// Round-robin 负载均衡算法？
+
+	// 如果 client <= 3.3, 当配置多个 endpoint 时，负载均衡算法仅会从中选择一个 IP 并创建连接（Pinned endpoint），
+	// 这样可以节省服务器的总连接数。但在 heavy usage场景，这可能造成 server 负载不均衡。
+	// 在 client 3.4 之前的版本中，负载均衡有一个严重的Bug：如果第一个节点异常了，可能会导致 client 访问 etcd server
+	// 异常，特别是在 k8s 场景中会导致 APIServer 不可用（k8s 1.16 后被修复）。
+
+	// client 和 server 之间的通信基于 HTTP/2 的 gRPC 协议，相比于 v2 版本的 HTTP/1.x, HTTP/2 是基于二进制的而不是
+	// 基于文本、支持多路复用而不再有序且阻塞、支持数据压缩以减少包大小、支持server push等特性。
+
 	cfg := clientConfigFromCmd(cmd)
 	return cfg.mustClient()
 }

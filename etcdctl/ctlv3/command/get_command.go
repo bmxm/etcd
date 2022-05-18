@@ -44,6 +44,9 @@ func NewGetCommand() *cobra.Command {
 		Run:   getCommandFunc,
 	}
 
+	// 以 consistency 为例
+	// 可以 --consistency=xx
+	// 或者 --consistency xx
 	cmd.Flags().StringVar(&getConsistency, "consistency", "l", "Linearizable(l) or Serializable(s)")
 	cmd.Flags().StringVar(&getSortOrder, "order", "", "Order of results; ASCEND or DESCEND (ASCEND by default)")
 	cmd.Flags().StringVar(&getSortTarget, "sort-by", "", "Sort target; CREATE, KEY, MODIFY, VALUE, or VERSION")
@@ -59,8 +62,21 @@ func NewGetCommand() *cobra.Command {
 
 // getCommandFunc executes the "get" command.
 func getCommandFunc(cmd *cobra.Command, args []string) {
+	// 如果执行的是 ./bin/etcdctl get hello
+	// 那么这里的 args = ["hello"]
+
+	// 如果执行的是 ./bin/etcdctl get hello --endpoints http://127.0.0.1:2379
+	// 那么这里依然是 args = ["hello"]
+
+	// 解析参数
 	key, opts := getGetOp(args)
+
+	// 构建 context.Context
 	ctx, cancel := commandCtx(cmd)
+
+	// 请求服务端
+	// 解析完参数后，etcdctl 会创建一个 client v3 库对象，
+	// 使用 KVServer 模块的 API 来访问 etcd server。
 	resp, err := mustClientFromCmd(cmd).Get(ctx, key, opts...)
 	cancel()
 	if err != nil {
@@ -101,6 +117,7 @@ func getGetOp(args []string) (string, []clientv3.OpOption) {
 	case "s":
 		opts = append(opts, clientv3.WithSerializable())
 	case "l":
+		// 不指定则默认走到这
 	default:
 		cobrautl.ExitWithError(cobrautl.ExitBadFeature, fmt.Errorf("unknown consistency flag %q", getConsistency))
 	}

@@ -92,6 +92,20 @@ type Authenticator interface {
 	RoleList(ctx context.Context, r *pb.AuthRoleListRequest) (*pb.AuthRoleListResponse, error)
 }
 
+// etcd 提供了丰富的 metrics、日志、请求行为检查等机制，可记录所有请求的执行耗时及错误码、来源IP等，
+// 也可控制请求是否允许通过，比如 etcd Learner 节点只允许指定接口和参数访问，帮助定位问题，提高服务
+// 的可监测性。
+
+// 当 server 收到 client 的 Range RPC 请求后，根据 ServiceName 和 RPC Method 将请求转发到对
+// 应的 handler 实现，handler 首先会串行执行一系列拦截器，通过调用 KVServer 模块的 Range 接口
+// 获取数据。
+
+// 串行读和线性读
+// 串行读(Serializable): 直接读取状态机数据返回、无需通过 Raft 协议与集群进行交互的模式.
+// 具有 低延时、高吞吐的特点，适合对数据一致性要求不高的场景。
+//
+// etcd 默认读模式是线性读，需要经过 Raft 协议模块，反应的是集群共识。
+
 func (s *EtcdServer) Range(ctx context.Context, r *pb.RangeRequest) (*pb.RangeResponse, error) {
 	trace := traceutil.New("range",
 		s.Logger(),
