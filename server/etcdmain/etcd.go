@@ -49,12 +49,16 @@ var (
 	dirEmpty  = dirType("empty")
 )
 
+// etcd 服务端对 EtcdServer 结构进行了抽象，其包含了 raftNode 属性，代表 Raft 集群中的一个节点，
+// 其主要的逻辑在startEtcdOrProxyV2函数中：
 func startEtcdOrProxyV2(args []string) {
 	grpc.EnableTracing = false
 
+	// 解析参数
 	cfg := newConfig()
 	defaultInitialCluster := cfg.ec.InitialCluster
 
+	// 从第二个参数开始解析命令行输入参数
 	err := cfg.parse(args[1:])
 	lg := cfg.ec.GetLogger()
 	// If we failed to parse the whole configuration, print the error using
@@ -110,6 +114,10 @@ func startEtcdOrProxyV2(args []string) {
 	var stopped <-chan struct{}
 	var errc <-chan error
 
+	// 返回 data 目录的类型
+	// 有 dirMember、dirProxy、dirEmpty，分别对应 etcd 目录、Proxy目录和空目录。
+	// etcd 首先根据 data 目录的类型，判断启动 etcd 还是启动代理。
+	// 如果是 dirEmpty，再根据命令行参数是否指定了 proxy模式来判断。
 	which := identifyDataDirOrDie(cfg.ec.GetLogger(), cfg.ec.Dir)
 	if which != dirEmpty {
 		lg.Info(
@@ -117,8 +125,11 @@ func startEtcdOrProxyV2(args []string) {
 			zap.String("data-dir", cfg.ec.Dir),
 			zap.String("dir-type", string(which)),
 		)
+
+		// 以何种模式启动 etcd
 		switch which {
 		case dirMember:
+			// startEtcd 核心方法，用于启动 etcd
 			stopped, errc, err = startEtcd(&cfg.ec)
 		case dirProxy:
 			err = startProxy(cfg)
@@ -203,6 +214,7 @@ func startEtcdOrProxyV2(args []string) {
 		lg.Fatal("discovery failed", zap.Error(err))
 	}
 
+	//  注册信号，包括 SIGINT、SIGTERM，用来终止程序，并清理系统。
 	osutil.HandleInterrupts(lg)
 
 	// At this point, the initialization of etcd is done.
@@ -210,8 +222,10 @@ func startEtcdOrProxyV2(args []string) {
 	// for accepting connections. The etcd instance should be
 	// joined with the cluster and ready to serve incoming
 	// connections.
+	// 初始化完成，监听对外的连接。
 	notifySystemd(lg)
 
+	// 监听 channel上的数据流动，异常捕获与等待退出。
 	select {
 	case lerr := <-errc:
 		// fatal out on listener errors
@@ -219,10 +233,13 @@ func startEtcdOrProxyV2(args []string) {
 	case <-stopped:
 	}
 
+	// 接收到异常或退出的命令。
 	osutil.Exit(0)
 }
 
 // startEtcd runs StartEtcd in addition to hooks needed for standalone etcd.
+// startEtcd启动 etcd 服务主要是通过调用StartEtcd方法，该方法的实现位于 embed 包，
+// 用于启动 etcd 服务器和 HTTP 处理程序，以进行客户端/服务器通信。
 func startEtcd(cfg *embed.Config) (<-chan struct{}, <-chan error, error) {
 	e, err := embed.StartEtcd(cfg)
 	if err != nil {

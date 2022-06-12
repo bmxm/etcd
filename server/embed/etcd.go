@@ -100,11 +100,23 @@ type peerListener struct {
 // StartEtcd launches the etcd server and HTTP handlers for client/server communication.
 // The returned Etcd.Server is not guaranteed to have joined the cluster. Wait
 // on the Etcd.Server.ReadyNotify() channel to know when it completes and is ready for use.
+//
+// 启动 etcd Server，包括三个主要的步骤：
+//     首先e.Server.Start初始化 Server 启动的必要信息；
+//     接着实现集群内部通讯；
+//     最后开始接收 peer 和客户端的请求，包括 range、put 等请求。
+//
+// etcd 服务端的启动包括两大块：
+//     etcdServer 主进程，直接或者间接包含了 raftNode、WAL、Snapshotter 等多个核心组件，可以理解为一个容器；
+//     另一块则是 raftNode，对内部 Raft 协议实现的封装，暴露简单的接口，用来保证写事务的集群一致性。
+//
 func StartEtcd(inCfg *Config) (e *Etcd, err error) {
+	// 校验 etcd 配置
 	if err = inCfg.Validate(); err != nil {
 		return nil, err
 	}
 	serving := false
+	// 根据合法的配置，创建 etcd 实例
 	e = &Etcd{cfg: *inCfg, stopc: make(chan struct{})}
 	cfg := &e.cfg
 	defer func() {
@@ -132,6 +144,7 @@ func StartEtcd(inCfg *Config) (e *Etcd, err error) {
 		"configuring peer listeners",
 		zap.Strings("listen-peer-urls", e.cfg.getLPURLs()),
 	)
+	// 为每个 peer 创建一个 peerListener(rafthttp.NewListener)，用于接收 peer 的消息
 	if e.Peers, err = configurePeerListeners(cfg); err != nil {
 		return e, err
 	}
@@ -140,6 +153,7 @@ func StartEtcd(inCfg *Config) (e *Etcd, err error) {
 		"configuring client listeners",
 		zap.Strings("listen-client-urls", e.cfg.getLCURLs()),
 	)
+	// 创建 client 的 listener(transport.NewKeepAliveListener) contexts 的 map，用于服务端处理客户端的请求
 	if e.sctxs, err = configureClientListeners(cfg); err != nil {
 		return e, err
 	}
@@ -242,6 +256,7 @@ func StartEtcd(inCfg *Config) (e *Etcd, err error) {
 
 	print(e.cfg.logger, *cfg, srvcfg, memberInitialized)
 
+	// 创建 etcdServer
 	if e.Server, err = etcdserver.NewServer(srvcfg); err != nil {
 		return e, err
 	}
@@ -262,14 +277,21 @@ func StartEtcd(inCfg *Config) (e *Etcd, err error) {
 			return e, err
 		}
 	}
+	// 在处理请求之前，Start方法初始化 Server 的必要信息，需要在Do和Process之前调用，且必须是非阻塞的，
+	// 任何耗时的函数都必须在单独的协程中运行。Start方法的实现中还启动了多个 goroutine，这些协程用于
+	// 选举时钟设置以及注册自身信息到服务器等异步操作。
 	e.Server.Start()
 
+	// 在 rafthttp 启动之后，配置 peer Handler
+	// 集群内部通信，接收 peer 消息
 	if err = e.servePeers(); err != nil {
 		return e, err
 	}
+	// 接收客户端请求
 	if err = e.serveClients(); err != nil {
 		return e, err
 	}
+	// 提供导出 metrics
 	if err = e.serveMetrics(); err != nil {
 		return e, err
 	}
@@ -529,6 +551,11 @@ func configurePeerListeners(cfg *Config) (peers []*peerListener, err error) {
 }
 
 // configure peer handlers after rafthttp.Transport started
+//
+// 集群内部的通信主要由 Etcd.servePeers 实现，在 rafthttp.Transport 启动之后，配置集群成员的处理器。
+// 首先生成 http.Handler 来处理 etcd 集群成员的请求，并做一些配置校验。goroutine 读取 gRPC 请求，
+// 然后调用 srv.Handler 处理这些请求。srv.Serve总是返回非空的错误，当 Shutdown或者 Close 时，
+// 返回的错误则是 ErrServerClosed。最后srv.Serve在独立协程启动对集群成员的监听。
 func (e *Etcd) servePeers() (err error) {
 	ph := etcdhttp.NewPeerHandler(e.GetLogger(), e.Server)
 	var peerTLScfg *tls.Config
@@ -683,6 +710,11 @@ func configureClientListeners(cfg *Config) (sctxs map[string]*serveCtx, err erro
 	return sctxs, nil
 }
 
+// serveClients 主要用来处理客户端请求，比如我们常见的 range、put 等请求。
+// etcd 处理客户端的请求，每个客户端的请求对应一个 goroutine 协程，这也是
+// etcd 高性能的支撑，etcd Server 为每个监听的地址 启动一个客户端服务协程，
+// 根据 v2、v3 版本进行不同的处理。在serveClients中，还设置了 gRPC 的属性，
+// 包括 GRPCKeepAliveMinTime 、GRPCKeepAliveInterval以及 GRPCKeepAliveTimeout 等。
 func (e *Etcd) serveClients() (err error) {
 	if !e.cfg.ClientTLSInfo.Empty() {
 		e.cfg.logger.Info(

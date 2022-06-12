@@ -23,6 +23,8 @@ import (
 	"go.etcd.io/etcd/etcdctl/v3/ctlv3"
 )
 
+// 默认情况下 etcdctl 使用 v3 的API, 如果需要使用 v2:
+// export ETCDCTL_API=2
 const (
 	apiEnv = "ETCDCTL_API"
 )

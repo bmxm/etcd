@@ -327,7 +327,22 @@ func (bh *backendHooks) SetConfState(confState *raftpb.ConfState) {
 
 // NewServer creates a new EtcdServer from the supplied configuration. The
 // configuration is considered static for the lifetime of the EtcdServer.
+//
+// NewServer() |-v2store.New() // 创建 store，根据给定的命名空间来创建初始目录
+//			   |-wal.Exist() // 判断 wal 文件是否存在
+//		 	   |-fileutil.TouchDirAll // 创建文件夹
+//		 	   |-openBackend // 使用当前的 etcd db 返回一个 backend
+//		 	   |-restartNode() // 已有 WAL，直接根据 SnapShot 启动，最常见的场景
+//		 	   |-startNode() // 在没有 WAL 的情况下，新建一个节点
+//		 	   |-tr.Start // 启动 rafthttp
+//		 	   |-time.NewTicker() 通过创建 &EtcdServer{} 结构体时新建 tick 时钟
+//
+// 需要注意的是，我们要在 kv 键值对重建之前恢复租期 键 。当恢复 mvcc.KV 时，重新将 key绑定到租约上。
+// 如果先恢复 mvcc.KV，它有可能在恢复之前将 key绑定到错误的 lease。 另外就是最后的清理逻辑，
+// 在没有先关闭 kv的情况下关闭 backend，可能导致恢复的压缩失败，并出现 TX 错误。
+//
 func NewServer(cfg config.ServerConfig) (srv *EtcdServer, err error) {
+	// 创建 store，根据给定的命名空间来创建初始目录
 	st := v2store.New(StoreClusterPrefix, StoreKeysPrefix)
 
 	var (
@@ -352,8 +367,10 @@ func NewServer(cfg config.ServerConfig) (srv *EtcdServer, err error) {
 		return nil, fmt.Errorf("cannot access data directory: %v", terr)
 	}
 
+	// 判断 wal 文件是否存在
 	haveWAL := wal.Exist(cfg.WALDir())
 
+	// 创建文件夹
 	if err = fileutil.TouchDirAll(cfg.SnapDir()); err != nil {
 		cfg.Logger.Fatal(
 			"failed to create snapshot directory",
@@ -379,6 +396,7 @@ func NewServer(cfg config.ServerConfig) (srv *EtcdServer, err error) {
 
 	ci := cindex.NewConsistentIndex(nil)
 	beHooks := &backendHooks{lg: cfg.Logger, indexer: ci}
+	// 使用当前的 etcd db 返回一个 backend
 	be := openBackend(cfg, beHooks)
 	ci.SetBackend(be)
 	cindex.CreateMetaBucket(be.BatchTx())
@@ -405,15 +423,36 @@ func NewServer(cfg config.ServerConfig) (srv *EtcdServer, err error) {
 		snapshot *raftpb.Snapshot
 	)
 
+	// 在NewServer的实现中，我们可以基于条件语句判断 Raft 的启动方式，具体实现如下：
+	// switch {
+	// case !haveWAL && !cfg.NewCluster:
+	//   startNode
+	// case !haveWAL && cfg.NewCluster:
+	//   startNode
+	// case haveWAL:
+	//   restartAsStandaloneNode
+	//   restartNode
+	// default:
+	// return nil, fmt.Errorf("unsupported Bootstrap config") }
+	//
+	// haveWAL变量对应的表达式为wal.Exist(cfg.WALDir())，用来判断是否存在 WAL，
+	// cfg.NewCluster则对应 etcd 启动时的--initial-cluster-state，标识节点初始化方式，
+	// 该配置默认为new，对应的变量 haveWAL的值为 true。new 表示没有集群存在，
+	// 所有成员以静态方式或 DNS 方式启动，创建新集群；existing表示集群存在，节点将尝试加入集群。
+	// 在三种不同的条件下，raft 对应三种启动的方式，分别是：
+	// startNode、restartAsStandaloneNode 和 restartNode。
 	switch {
 	case !haveWAL && !cfg.NewCluster:
+		// 加入现有集群时检查初始配置，如有问题则返回错误
 		if err = cfg.VerifyJoinExisting(); err != nil {
 			return nil, err
 		}
+		// 使用提供的地址映射创建一个新 raft 集群
 		cl, err = membership.NewClusterFromURLsMap(cfg.Logger, cfg.InitialClusterToken, cfg.InitialPeerURLsMap)
 		if err != nil {
 			return nil, err
 		}
+		// GetClusterFromRemotePeers 采用一组表示 etcd peer 的 URL，并尝试通过访问其中一个 URL 上的成员端点来构造集群
 		existingCluster, gerr := GetClusterFromRemotePeers(cfg.Logger, getRemotePeerURLs(cl, cfg.Name), prt)
 		if gerr != nil {
 			return nil, fmt.Errorf("cannot fetch cluster info from peer urls: %v", gerr)
@@ -421,6 +460,7 @@ func NewServer(cfg config.ServerConfig) (srv *EtcdServer, err error) {
 		if err = membership.ValidateClusterAndAssignIDs(cfg.Logger, cl, existingCluster); err != nil {
 			return nil, fmt.Errorf("error validating peerURLs %s: %v", existingCluster, err)
 		}
+		// 校验兼容性
 		if !isCompatibleWithCluster(cfg.Logger, cl, cl.MemberByName(cfg.Name).ID, prt) {
 			return nil, fmt.Errorf("incompatible with current running cluster")
 		}
@@ -429,6 +469,7 @@ func NewServer(cfg config.ServerConfig) (srv *EtcdServer, err error) {
 		cl.SetID(types.ID(0), existingCluster.ID())
 		cl.SetStore(st)
 		cl.SetBackend(be)
+		// 在没有 WAL 的情况下，新建一个节点
 		id, n, s, w = startNode(cfg, cl, nil)
 		cl.SetID(id, existingCluster.ID())
 
@@ -530,8 +571,15 @@ func NewServer(cfg config.ServerConfig) (srv *EtcdServer, err error) {
 		}
 
 		if !cfg.ForceNewCluster {
+			// 已有 WAL，直接根据 SnapShot 启动，最常见的场景
+			// 在已有 WAL数据的情况中，除了restartAsStandaloneNode场景， 当--force-new-cluster为默认的 false 时，
+			// 直接重启 raftNode。这种操作相对来说比较简单，减少了丢弃本地未提交的 entries 以及强制追加新提 交的 entries 的步骤。
+			// 接下来要做的就是直接重启 raftNode 还原之前集群节点的状态，读取 WAL和快照数据，最后启动并更新 raftStatus。
 			id, cl, n, s, w = restartNode(cfg, snapshot)
 		} else {
+			// 当--force-new-cluster配置为 true 时，则会调用 restartAsStandaloneNode，
+			// 即强制创建一个新的单成员集群。该节点将会提交配置更新，强制删除集群中的所有成员，
+			// 并添加自身作为集群的一个节点，同时我们 需要将其备份设置进行还原。
 			id, cl, n, s, w = restartAsStandaloneNode(cfg, snapshot)
 		}
 
@@ -675,6 +723,7 @@ func NewServer(cfg config.ServerConfig) (srv *EtcdServer, err error) {
 		LeaderStats: lstats,
 		ErrorC:      srv.errorc,
 	}
+	// 启动 rafthttp
 	if err = tr.Start(); err != nil {
 		return nil, err
 	}

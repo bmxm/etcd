@@ -67,3 +67,46 @@ func TestMain(m *testing.M) {
 
 //  etcdctl --endpoints=etcd.etcd-dev:2379 --user root:xxx get m
 //  etcdctl --endpoints etcd.etcd-dev:2379 --user root:xx get / --prefix --keys-only
+
+/*
+
+写入一个key
+./bin/etcdctl put foo bar
+
+绑定一个租期
+./bin/etcdctl put foo bar --lease=1234abcd
+
+只打印 value 值
+./bin/etcdctl get foo --print-value-only
+
+读取一个范围的 key (左闭右开)
+./bin/etcdctl get foo foo3
+
+通过前缀遍历 key
+./bin/etcdctl get fo --prefix
+
+限制输出的结果
+./bin/etcdctl get fo --prefix --limit=1
+
+获取指定版本的 key
+./bin/etcdctl get foo1 --rev=0
+
+获取字典序比 foo 大的key(包含)
+./bin/etcdctl get foo --from-key
+
+删除一个key
+./bin/etcdctl del m
+
+删除一个范围内的key
+ ./bin/etcdctl del m m2
+
+删除的同时返回 key-value
+./bin/etcdctl del m --prev-kv
+
+watch 某个 key (这个 key 可以不存在), 在终端中会一直观察
+./bin/etcdctl watch foo
+
+创建一个10s的租约
+./bin/etcdctl lease grant 10
+
+*/

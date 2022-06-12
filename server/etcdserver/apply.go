@@ -329,6 +329,9 @@ func (a *applierV3backend) DeleteRange(txn mvcc.TxnWrite, dr *pb.DeleteRangeRequ
 	return resp, nil
 }
 
+// Range 在 applierV3backend 中实现时，首先准备分页的大小，多取一个，用于判断分页是否存在下一页。
+// 随后构造 Range 请求，调用 mvcc 包中的 Range 方法获取结果，最后对结果进行排序并将结果返回给客户端，
+// 由于当前的 mvcc.Range 实现返回按字典序升序的结果，因此默认情况下仅当目标不是KEY时才进行升序排序。
 func (a *applierV3backend) Range(ctx context.Context, txn mvcc.TxnRead, r *pb.RangeRequest) (*pb.RangeResponse, error) {
 
 	trace := traceutil.Get(ctx)
@@ -341,6 +344,7 @@ func (a *applierV3backend) Range(ctx context.Context, txn mvcc.TxnRead, r *pb.Ra
 		defer txn.End()
 	}
 
+	// 分页大小
 	limit := r.Limit
 	if r.SortOrder != pb.RangeRequest_NONE ||
 		r.MinModRevision != 0 || r.MaxModRevision != 0 ||
@@ -350,15 +354,18 @@ func (a *applierV3backend) Range(ctx context.Context, txn mvcc.TxnRead, r *pb.Ra
 	}
 	if limit > 0 {
 		// fetch one extra for 'more' flag
+		// 多取一个，判断分页
 		limit = limit + 1
 	}
 
+	// 构造 Range 请求
 	ro := mvcc.RangeOptions{
 		Limit: limit,
 		Rev:   r.Revision,
 		Count: r.CountOnly,
 	}
 
+	// 获取 Range 结果
 	rr, err := txn.Range(ctx, r.Key, mkGteRange(r.RangeEnd), ro)
 	if err != nil {
 		return nil, err
@@ -381,6 +388,7 @@ func (a *applierV3backend) Range(ctx context.Context, txn mvcc.TxnRead, r *pb.Ra
 		pruneKVs(rr, f)
 	}
 
+	// 排序
 	sortOrder := r.SortOrder
 	if r.SortTarget != pb.RangeRequest_KEY && sortOrder == pb.RangeRequest_NONE {
 		// Since current mvcc.Range implementation returns results
@@ -410,11 +418,14 @@ func (a *applierV3backend) Range(ctx context.Context, txn mvcc.TxnRead, r *pb.Ra
 		}
 	}
 
+	// 分页取
 	if r.Limit > 0 && len(rr.KVs) > int(r.Limit) {
 		rr.KVs = rr.KVs[:r.Limit]
 		resp.More = true
 	}
 	trace.Step("filter and sort the key-value pairs")
+
+	// 组装响应
 	resp.Header.Revision = rr.Rev
 	resp.Count = int64(rr.Count)
 	resp.Kvs = make([]*mvccpb.KeyValue, len(rr.KVs))

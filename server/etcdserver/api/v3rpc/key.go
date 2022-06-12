@@ -37,24 +37,37 @@ func NewKVServer(s *etcdserver.EtcdServer) pb.KVServer {
 	return &kvServer{hdr: newHeader(s), kv: s, maxTxnOps: s.Cfg.MaxTxnOps}
 }
 
+// Range etcd 中读取单个key和批量key所使用的都是此方法。
+//
+// 客户端发起请求之后，clientv3 首先会根据负载均衡算法选择一个合适的 etcd 节点，
+// 接着调用 KVServer 模块对应的 RPC 接口，发起 Range 请求的 gRPC 远程调用；
+// gRPC Server 上注册的拦截器拦截到 Range 请求，实现 Metrics 统计、日志记录等功能；
+// 然后进入读的主要过程，etcd 模式实现了线性读，使得任何客户端通过线性读都能及时访问到键值对的更新；
+// 线性读获取到 Leader 已提交日志索引构造的最新 ReadState 对象，实现本节点状态机的同步；
+// 接着就是调用 MVCC 模块，根据 treeIndex模块 B-tree 快速查找 key对应的版本号；
+// 通过获取的版本号作为 key，查询存储在 boltdb 中的键值对，我们在之前的存储部分讲解过此过程。
 func (s *kvServer) Range(ctx context.Context, r *pb.RangeRequest) (*pb.RangeResponse, error) {
 	// 如果执行的是 ./bin/etcdctl get hello
 	// 则 这里的 string(r.Key) = hello
 
+	// 检验 Range 请求的参数
 	if err := checkRangeRequest(r); err != nil {
 		return nil, err
 	}
 
+	// Range 请求的主要部分在于调用 RaftKV.Range()方法。这将会调用到 etcdserver 包中对 RaftKV 的实现：
 	// 这里执行的是 v3_server.go 中的 EtcdServer 对象的 Range 方法
 	resp, err := s.kv.Range(ctx, r)
 	if err != nil {
 		return nil, togRPCError(err)
 	}
 
+	// 使用 etcd Server 的信息填充 pb.ResponseHeader
 	s.hdr.fill(resp.Header)
 	return resp, nil
 }
 
+// Put 操作用于插入或者更新指定的键值对。
 func (s *kvServer) Put(ctx context.Context, r *pb.PutRequest) (*pb.PutResponse, error) {
 	if err := checkPutRequest(r); err != nil {
 		return nil, err

@@ -130,6 +130,10 @@ type Transport struct {
 	streamProber   probing.Prober
 }
 
+// Start : Transport 实现了 Transporter 接口，它提供了将 raft 消息发送到 peer 并从 peer 接收 raft 消息的功能。
+// 我们需要调用 Handler 方法来获取处理程序，以处理从 peerURLs 接收到的请求。用户需要先调用 Start 才能调用 其他功能，
+// 并在停止使用 Transport 时调用 Stop。 rafthttp 的启动过程中首先要构建 Transport，并将 m.PeerURLs 分别赋值到
+// Transport 中的 Remote 和 Peer 中，之后将 srv.r.transport 指向构建好的 Transport 即可。
 func (t *Transport) Start() error {
 	var err error
 	t.streamRt, err = newStreamRoundTripper(t.TLSInfo, t.DialTimeout)

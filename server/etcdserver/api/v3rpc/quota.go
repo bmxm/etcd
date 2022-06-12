@@ -56,7 +56,22 @@ func NewQuotaKVServer(s *etcdserver.EtcdServer) pb.KVServer {
 	}
 }
 
+// Put 方法的调用过程，可以列出如下的主要方法：
+// quotaKVServer.Put() api/v3rpc/quota.go 首先检查是否满足需求
+//  |-quotoAlarm.check() 检查
+//  |-KVServer.Put() api/v3rpc/key.go 真正的处理请求
+//  |-checkPutRequest() 校验请求参数是否合法
+//  |-RaftKV.Put() etcdserver/v3_server.go 处理请求
+//  |=EtcdServer.Put() 实际调用的是该函数
+//    |-raftRequest()
+//    |-raftRequestOnce()
+//    |-processInternalRaftRequestOnce() 真正开始处理请求
+//    |-context.WithTimeout() 创建超时的上下文信息
+//    |-raftNode.Propose() raft/node.go
+//    |-raftNode.step() 对于类型为 MsgProp 类型消息，向 propc 通道中传入数据
+//  |-header.fill() etcdserver/api/v3rpc/header.go 填充响应的头部信息
 func (s *quotaKVServer) Put(ctx context.Context, r *pb.PutRequest) (*pb.PutResponse, error) {
+	// check方法将检查请求是否满足配额。如果空间不足，将会忽略请求并发出可用空间不足的警报。
 	if err := s.qa.check(ctx, r); err != nil {
 		return nil, err
 	}

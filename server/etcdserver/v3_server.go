@@ -134,10 +134,12 @@ func (s *EtcdServer) Range(ctx context.Context, r *pb.RangeRequest) (*pb.RangeRe
 			return nil, err
 		}
 	}
+	// 认证校验
 	chk := func(ai *auth.AuthInfo) error {
 		return s.authStore.IsRangePermitted(ai, r.Key, r.RangeEnd)
 	}
 
+	// 查询结果
 	get := func() { resp, err = s.applyV3Base.Range(ctx, nil, r) }
 	if serr := s.doSerialize(ctx, chk, get); serr != nil {
 		err = serr
@@ -146,6 +148,29 @@ func (s *EtcdServer) Range(ctx context.Context, r *pb.RangeRequest) (*pb.RangeRe
 	return resp, err
 }
 
+// Put 客户端发送写请求，通过负载均衡算法选取合适的 etcd 节点，发起 gRPC 调用。
+// etcd server 的 gRPC Server 收到这个请求，经过 gRPC 拦截器拦截，实现
+// Metrics 统计和日志记录等功能。 Quota 模块配额检查 db 的大小，如果超过会报
+// etcdserver: mvcc: database space exceeded的告警，通过 Raft 日志同步给集群
+// 中的节点 db 空间不足，同时告警也会持久化到 db 中。etcd 服务端拒绝写入，对外提供只读的功能。
+// 配额检查通过，KVServer 模块经过限速、鉴权、包大小判断之后，生成唯一的编号，这时才
+// 会将写请求封装为提案消息，提交给 Raft 模块。 写请求的提案只能由 Leader 处理，
+// 获取到 Raft 模块的日志条目之后，Leader 会广播提案内容。WAL模块完成 Raft 日志条目内容封装，
+// 当集群大多数节点完成日志条目的持久化，即将提案的状态变更为已提交，可以执行提案内容。
+// Apply模块用于执行提案，首先会判断该提案是否被执行过，如果已经执行，则直接返回结束；
+// 未执行过的情况下，将会进入 MVCC 模块执行持久化提案内容的操作。 MVCC 模块中的
+// treeIndex保存了 key的历史版本号信息，treeIndex使用 B-tree 结构维护了 key
+// 对应的版本信息，包含了全局版本号、修改次数等属性。版本号代表着 etcd 中的逻辑时钟，
+// 启动时默认的版本号为 1。
+// 键值对的修改、写入和删除都会使得版本号全局单调递增。写事务在执行时，首先根据写入的
+// key获取或者更新索引，如果不存在该 key，则会给予当前最大的 currentRevision 自增得到
+// revision；否则直接根据 key获取 revision。 根据从 treeIndex中获取到 revision、
+// 修改次数等属性，以及 put 请求传递的 key-value 信息，作为写入到 boltdb 的 value，
+// 而将 revision 作为写入到 boltdb 的 key。同时为了读请求能够获取最新的数据，etcd
+// 在写入 boltdb 时也会同步数据到 buffer。因此上文介绍 etcd 读请求的过程时，会优先从
+// buffer中读取，读取不到的情况下才会从 boltdb 读取，以此来保证一致性和性能。为了提高吞吐量，
+// 此时提案数据并未提交保存到 db 文件，而是由 backend 异步 goroutine 定时将批量事务提交。
+// Server 通过调用网络层接口返回结果给客户端。
 func (s *EtcdServer) Put(ctx context.Context, r *pb.PutRequest) (*pb.PutResponse, error) {
 	ctx = context.WithValue(ctx, traceutil.StartTimeKey, time.Now())
 	resp, err := s.raftRequest(ctx, pb.InternalRaftRequest{Put: r})

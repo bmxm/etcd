@@ -28,6 +28,10 @@ import (
 	"go.uber.org/zap"
 )
 
+// etcd 底层的存储基于 boltdb，使用newBackend方法构建 boltdb 需要的参数，
+// bolt.Open(bcfg.Path, 0600, bopts) 在给定路径下创建并打开数据库，
+// 其中第二个参数为打开文件的权限。如果该文件不存在，将自动创建。
+// 传递 nil参数将使 boltdb 使用默认选项打开数据库连接。
 func newBackend(cfg config.ServerConfig, hooks backend.Hooks) backend.Backend {
 	bcfg := backend.DefaultBackendConfig()
 	bcfg.Path = cfg.BackendPath()
@@ -68,14 +72,24 @@ func openSnapshotBackend(cfg config.ServerConfig, ss *snap.Snapshotter, snapshot
 }
 
 // openBackend returns a backend using the current etcd db.
+// 创建好 etcdServer 实例之后，另一个重要的操作便是启动 backend。
+// backend 是 etcd 的存储支撑，openBackend调用当前的 db 返回一个 backend。
+//
+// openBackend的实现中首先创建一个 backend.Backend 类型的 chan，
+// 并使用单独的协程启动 backend，设置启动的超时时间为 10s。
+// beOpened <- newBackend(cfg)主要用来配置 backend 启动参数，具体的实现则在 backend 包中。
+//
 func openBackend(cfg config.ServerConfig, hooks backend.Hooks) backend.Backend {
+	// db 存储的路径
 	fn := cfg.BackendPath()
 
 	now, beOpened := time.Now(), make(chan backend.Backend)
 	go func() {
+		// 单独协程启动 backend
 		beOpened <- newBackend(cfg, hooks)
 	}()
 
+	// 阻塞，等待 backend 启动，或者 10s 超时
 	select {
 	case be := <-beOpened:
 		cfg.Logger.Info("opened backend db", zap.String("path", fn), zap.Duration("took", time.Since(now)))

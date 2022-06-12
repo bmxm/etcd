@@ -420,6 +420,12 @@ func (r *raftNode) advanceTicks(ticks int) {
 	}
 }
 
+// StartNode 基于给定的配置和 raft 成员列表，返回一个新的节点，
+// 它将每个给定 peer 的 ConfChangeAddNode 条目附加到初始日志中。
+// peers 的长度不能为零，如果长度为零将调用 RestartNode 方法
+//
+// 在没有 WAL日志，并且是新配置结点的场景下，需要传入集群的成员 ids，
+// 如果加入已有的集群则不需要。
 func startNode(cfg config.ServerConfig, cl *membership.RaftCluster, ids []types.ID) (id types.ID, n raft.Node, s *raft.MemoryStorage, w *wal.WAL) {
 	var err error
 	member := cl.MemberByName(cfg.Name)
@@ -473,6 +479,12 @@ func startNode(cfg config.ServerConfig, cl *membership.RaftCluster, ids []types.
 	return id, n, s, w
 }
 
+// RestartNode 与 StartNode 类似，但不包含包 peers 列表列，集群的当前成员关系将从存储中恢复。
+// 如果调用方存在状态机，则传入已应用到该状态机的最新一个日志索引值；否则直接使用零作为参数。
+//
+// 当已存在 WAL文件时，raft Node 启动时首先需要检查响应文件夹的读写权限（当集群初始化之后，discovery token将不会生效）；
+// 接着将会加载快照文件，并从 snapshot 恢复 backend 存储。 cfg.ForceNewCluster对应 etcd 配置中的--force-new-cluster，
+// 如果为 true，则会强制创建一个新的单成员集群；否则重新启动 raft Node。
 func restartNode(cfg config.ServerConfig, snapshot *raftpb.Snapshot) (types.ID, *membership.RaftCluster, raft.Node, *raft.MemoryStorage, *wal.WAL) {
 	var walsnap walpb.Snapshot
 	if snapshot != nil {
@@ -513,6 +525,10 @@ func restartNode(cfg config.ServerConfig, snapshot *raftpb.Snapshot) (types.ID, 
 	return id, cl, n, s, w
 }
 
+// restartAsStandaloneNode 的实现中，首先读取 WAL文件，并且丢弃本地未提交的 entries。
+// createConfigChangeEnts 创建一系列 Raft 条目（即 EntryConfChange），用于从集群中
+// 删除一组给定的ID。如果当前节 点self出现在条目中，也不会被删除；如果self不在给定的 ID 内，
+// 它将创建一个 Raft 条目以添加给定的self默认成员，随后强制追加新提交的 entries 到现有的数据存储中。
 func restartAsStandaloneNode(cfg config.ServerConfig, snapshot *raftpb.Snapshot) (types.ID, *membership.RaftCluster, raft.Node, *raft.MemoryStorage, *wal.WAL) {
 	var walsnap walpb.Snapshot
 	if snapshot != nil {
