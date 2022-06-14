@@ -382,6 +382,7 @@ func mustListenCMux(lg *zap.Logger, tlsinfo *transport.TLSInfo) cmux.CMux {
 	return cmux.New(l)
 }
 
+// newGRPCProxyServer 直接运行server下的main函数不会走到这里，那这个是干什么用的？
 func newGRPCProxyServer(lg *zap.Logger, client *clientv3.Client) *grpc.Server {
 	if grpcProxyEnableOrdering {
 		vf := ordering.NewOrderViolationSwitchEndpointClosure(client)
@@ -439,8 +440,10 @@ func newGRPCProxyServer(lg *zap.Logger, client *clientv3.Client) *grpc.Server {
 		}))
 	}
 
+	// 创建 server
 	server := grpc.NewServer(gopts...)
 
+	// 注册服务
 	pb.RegisterKVServer(server, kvp)
 	pb.RegisterWatchServer(server, watchp)
 	pb.RegisterClusterServer(server, clusterp)

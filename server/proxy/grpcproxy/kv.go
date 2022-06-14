@@ -67,6 +67,7 @@ func (p *kvProxy) Range(ctx context.Context, r *pb.RangeRequest) (*pb.RangeRespo
 	return gresp, nil
 }
 
+// Put 学习一下ETCD是如何使用 ctx 的
 func (p *kvProxy) Put(ctx context.Context, r *pb.PutRequest) (*pb.PutResponse, error) {
 	p.cache.Invalidate(r.Key, nil)
 	cacheKeys.Set(float64(p.cache.Size()))
