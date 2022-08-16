@@ -42,14 +42,27 @@ type Bucket interface {
 	IsSafeRangeBucket() bool
 }
 
+// etcd 对批量读写事务的抽象
 type BatchTx interface {
-	ReadTx
+	ReadTx // 内嵌了ReadTx接口
+
+	// 创建Bucket
 	UnsafeCreateBucket(bucket Bucket)
+	
 	UnsafeDeleteBucket(bucket Bucket)
+
+	// 向指定Bucket中添加键值对
 	UnsafePut(bucket Bucket, key []byte, value []byte)
+
+	// 向指定Bucket中添加键值对，与UnsafePut()方法的区别是，其中会将对应Bucket实例的
+	// 填充比例设置为90%，这样可以在顺序写入时，提高Bucket的利用率
 	UnsafeSeqPut(bucket Bucket, key []byte, value []byte)
+
+	// 在指定Bucket中删除指定的键值对
 	UnsafeDelete(bucket Bucket, key []byte)
+
 	// Commit commits a previous tx and begins a new writable one.
+	// 提交当前的读写事务，之后立即打开一个新的读写事务
 	Commit()
 	// CommitAndStop commits the previous tx and does not create a new one.
 	CommitAndStop()

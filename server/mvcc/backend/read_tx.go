@@ -25,13 +25,16 @@ import (
 // overwrites on a bucket should only fetch with limit=1, but IsSafeRangeBucket
 // is known to never overwrite any key so range is safe.
 
+// etcd对只读事务的抽象
 type ReadTx interface {
 	Lock()
 	Unlock()
 	RLock()
 	RUnlock()
 
+	// 在指定的Bucket中进行范围查找
 	UnsafeRange(bucket Bucket, key, endKey []byte, limit int64) (keys [][]byte, vals [][]byte)
+	// 遍历指定Bucket中的全部键值对
 	UnsafeForEach(bucket Bucket, visitor func(k, v []byte) error) error
 }
 

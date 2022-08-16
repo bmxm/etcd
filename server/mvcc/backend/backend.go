@@ -47,26 +47,41 @@ var (
 
 type Backend interface {
 	// ReadTx returns a read transaction. It is replaced by ConcurrentReadTx in the main data path, see #10523.
+	// 创建一个只读事务，这里的ReadTx接口是 v3存储对只读事务的抽象
 	ReadTx() ReadTx
+
+	// 创建一个批量事务，这里的BatchTx接口是对批量读写事务的抽象
 	BatchTx() BatchTx
+
 	// ConcurrentReadTx returns a non-blocking read transaction.
 	ConcurrentReadTx() ReadTx
 
+	// 创建快照，backend.snapshot实现了该Snapshot接口
 	Snapshot() Snapshot
+
 	Hash(ignores func(bucketName, keyName []byte) bool) (uint32, error)
+
 	// Size returns the current size of the backend physically allocated.
 	// The backend can hold DB space that is not utilized at the moment,
 	// since it can conduct pre-allocation or spare unused space for recycling.
 	// Use SizeInUse() instead for the actual DB size.
+	// 获取当前已存储的总字节数
 	Size() int64
+
 	// SizeInUse returns the current size of the backend logically in use.
 	// Since the backend can manage free space in a non-byte unit such as
 	// number of pages, the returned value can be not exactly accurate in bytes.
 	SizeInUse() int64
+
 	// OpenReadTxN returns the number of currently open read transactions in the backend.
 	OpenReadTxN() int64
+
+	// 碎片整理
 	Defrag() error
+
+	// 提交批量读写事
 	ForceCommit()
+
 	Close() error
 }
 
@@ -85,16 +100,22 @@ type txReadBufferCache struct {
 	bufVersion uint64
 }
 
+// 结构体backend是 v3版本存储提供的Backend接口的默认实现，其底层存储使用的是 BoltDB
 type backend struct {
 	// size and commits are used with atomic operations so they must be
 	// 64-bit aligned, otherwise 32-bit tests will crash
 
 	// size is the number of bytes allocated in the backend
+	// 当前backend实例已存储的总字节数。
 	size int64
+
 	// sizeInUse is the number of bytes actually used in the backend
 	sizeInUse int64
+
 	// commits counts number of commits since start
+	// 从启动到目前为止，已经提交的事务数。
 	commits int64
+
 	// openReadTxN is the number of currently open read transactions in the backend
 	openReadTxN int64
 	// mlock prevents backend database file to be swapped
@@ -103,10 +124,14 @@ type backend struct {
 	mu sync.RWMutex
 	db *bolt.DB
 
+	// 两次批量读写事务提交的最大时间差。
 	batchInterval time.Duration
-	batchLimit    int
-	batchTx       *batchTxBuffered
+	// 指定一次批量事务中最大的操作数，当超过该阈值时，当前的批量事务会自动提交。
+	batchLimit int
+	// 批量读写事务，batchTxBuffered是在batchTx的基础上添加了缓存功能，两者都实现了 BatchTx 接口
+	batchTx *batchTxBuffered
 
+	// 只读事务，readTx实现了 ReadTx 接口。
 	readTx *readTx
 	// txReadBufferCache mirrors "txReadBuffer" within "readTx" -- readTx.baseReadTx.buf.
 	// When creating "concurrentReadTx":
@@ -124,15 +149,24 @@ type backend struct {
 
 type BackendConfig struct {
 	// Path is the file path to the backend file.
+	// BoltDB数据库文件的路径
 	Path string
+
 	// BatchInterval is the maximum time before flushing the BatchTx.
+	// 交两次批量事务的最大时间差，用来初始化backend实例中的batchInterval字段，默认值是100ms。
 	BatchInterval time.Duration
+
 	// BatchLimit is the maximum puts before flushing the BatchTx.
+	// 指定每个批量读写事务能包含的最多的操作个数，当超过这个阈值之后，当前批量读写事务会自动提交。该字段用来初始化backend中的batchLimit字段，默认值是10000。
 	BatchLimit int
+
 	// BackendFreelistType is the backend boltdb's freelist type.
 	BackendFreelistType bolt.FreelistType
+
 	// MmapSize is the number of bytes to mmap for the backend.
+	// BoltDB使用了mmap技术对数据库文件进行映射，该字段用来设置 mmap 中使用的内存大小，该字段会在创建 BoltDB 实例时使用。
 	MmapSize uint64
+
 	// Logger logs backend-side operations.
 	Logger *zap.Logger
 	// UnsafeNoFsync disables all uses of fsync.
@@ -156,6 +190,7 @@ func New(bcfg BackendConfig) Backend {
 	return newBackend(bcfg)
 }
 
+// 使用默认的配置参数初始化 backend 实例
 func NewDefaultBackend(path string) Backend {
 	bcfg := DefaultBackendConfig()
 	bcfg.Path = path
@@ -167,16 +202,20 @@ func newBackend(bcfg BackendConfig) *backend {
 		bcfg.Logger = zap.NewNop()
 	}
 
+	// 初始化BoltDB时的参数
 	bopts := &bolt.Options{}
 	if boltOpenOptions != nil {
 		*bopts = *boltOpenOptions
 	}
+
+	// mmap使用的内存大小
 	bopts.InitialMmapSize = bcfg.mmapSize()
 	bopts.FreelistType = bcfg.BackendFreelistType
 	bopts.NoSync = bcfg.UnsafeNoFsync
 	bopts.NoGrowSync = bcfg.UnsafeNoFsync
 	bopts.Mlock = bcfg.Mlock
 
+	// 创建bolt.DB实例
 	db, err := bolt.Open(bcfg.Path, 0600, bopts)
 	if err != nil {
 		bcfg.Logger.Panic("failed to open database", zap.String("path", bcfg.Path), zap.Error(err))
@@ -184,6 +223,7 @@ func newBackend(bcfg BackendConfig) *backend {
 
 	// In future, may want to make buffering optional for low-concurrency systems
 	// or dynamically swap between buffered/non-buffered depending on workload.
+	// 创建backend实例，并初始化其中各个字段
 	b := &backend{
 		db: db,
 
@@ -191,6 +231,7 @@ func newBackend(bcfg BackendConfig) *backend {
 		batchLimit:    bcfg.BatchLimit,
 		mlock:         bcfg.Mlock,
 
+		// 创建readTx实例并初始化backend.readTx字段
 		readTx: &readTx{
 			baseReadTx: baseReadTx{
 				buf: txReadBuffer{
@@ -214,10 +255,12 @@ func newBackend(bcfg BackendConfig) *backend {
 		lg: bcfg.Logger,
 	}
 
+	// 创建batchTxBuffered实例并初始化backend.batchTx字段
 	b.batchTx = newBatchTxBuffered(b)
 	// We set it after newBatchTxBuffered to skip the 'empty' commit.
 	b.hooks = bcfg.Hooks
 
+	// 启动一个单独的goroutine，其中会定时提交当前的批量读写事务，并开启新的批量读写事务
 	go b.run()
 	return b
 }
@@ -398,11 +441,15 @@ func (b *backend) SizeInUse() int64 {
 	return atomic.LoadInt64(&b.sizeInUse)
 }
 
+// 在backend.run()方法中，会按照batchInterval指定的时间间隔，定时提交批量读写数据，在提交之后会立即开启一个新的批量读写事务。
 func (b *backend) run() {
 	defer close(b.donec)
+
+	// 创建定时器
 	t := time.NewTimer(b.batchInterval)
 	defer t.Stop()
 	for {
+		// 阻塞等待上述定时器到期
 		select {
 		case <-t.C:
 		case <-b.stopc:
@@ -410,8 +457,10 @@ func (b *backend) run() {
 			return
 		}
 		if b.batchTx.safePending() != 0 {
+			// 提交当前的批量读写事务，并开启一个新的批量读写事务
 			b.batchTx.Commit()
 		}
+		// 重置定时器
 		t.Reset(b.batchInterval)
 	}
 }
