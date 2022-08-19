@@ -9,14 +9,22 @@ Raft is a protocol with which a cluster of nodes can maintain a replicated state
 The state machine is kept in sync through the use of a replicated log.
 For more details on Raft, see "In Search of an Understandable Consensus Algorithm"
 (https://raft.github.io/raft.pdf) by Diego Ongaro and John Ousterhout.
+Raft是一种协议，通过该协议，节点集群可以维护复制状态机。
+状态机通过使用复制日志保持同步。
+有关Raft的更多详细信息，请参阅“搜索可理解的共识算法”
+(https://raft.github.io/raft.pdf)由迭戈·翁加罗和约翰·奥斯特霍特创作。
 
 This Raft library is stable and feature complete. As of 2016, it is **the most widely used** Raft library in production, serving tens of thousands clusters each day. It powers distributed systems such as etcd, Kubernetes, Docker Swarm, Cloud Foundry Diego, CockroachDB, TiDB, Project Calico, Flannel, Hyperledger and more.
+该 Raft 库稳定，功能齐全。截至2016年，它是**生产中使用最广泛的**Raft库，每天为数万个集群提供服务。它为分布式系统提供动力，如etcd、Kubernetes、Docker Swarm、Cloud Foundry Diego、CockroachDB、TiDB、Project Calico、Flannel、Hyperledger等。
 
 Most Raft implementations have a monolithic design, including storage handling, messaging serialization, and network transport. This library instead follows a minimalistic design philosophy by only implementing the core raft algorithm. This minimalism buys flexibility, determinism, and performance.
+大多数Raft实现都采用单片设计，包括存储处理、消息序列化和网络传输。相反，该库遵循极简设计理念，仅实现核心raft算法。这种极简主义带来了灵活性、决定论和性能。
 
 To keep the codebase small as well as provide flexibility, the library only implements the Raft algorithm; both network and disk IO are left to the user. Library users must implement their own transportation layer for message passing between Raft peers over the wire. Similarly, users must implement their own storage layer to persist the Raft log and state.
+为了保持代码库较小并提供灵活性，库仅实现Raft算法；网络和磁盘IO都留给用户。库用户必须实现他们自己的传输层，以便通过网络在Raft对等点之间传递消息。类似地，用户必须实现自己的存储层来持久化Raft日志和状态。
 
 In order to easily test the Raft library, its behavior should be deterministic. To achieve this determinism, the library models Raft as a state machine.  The state machine takes a `Message` as input. A message can either be a local timer update or a network message sent from a remote peer. The state machine's output is a 3-tuple `{[]Messages, []LogEntries, NextState}` consisting of an array of `Messages`, `log entries`, and `Raft state changes`. For state machines with the same state, the same state machine input should always generate the same state machine output.
+为了便于测试，其行为应具有确定性。为了实现这种决定论，库将Raft建模为状态机。状态机将“消息”作为输入。消息可以是本地定时器更新或从远程对等方发送的网络消息。状态机的输出是一个三元组{[]消息、[]日志条目、下一状态}，由一组“消息”、“日志条目”和“Raft状态更改”组成。对于具有相同状态的状态机，相同状态机输入应始终生成相同的状态机输出。
 
 A simple example application, _raftexample_, is also available to help illustrate how to use this package in practice: https://github.com/etcd-io/etcd/tree/main/contrib/raftexample
 

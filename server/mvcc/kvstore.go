@@ -57,6 +57,8 @@ type StoreConfig struct {
 	CompactionBatchLimit int
 }
 
+// 如果要从BoltDB中查询键值对，必须通过revision进行查找。但客户端只知道具体的键值对中的Key值，并不清楚每个键值对对应的revision信息，
+// 所以在v3版本存储的内存索引（kvIndex）中保存的就是Key与revision之前的映射关系。
 type store struct {
 	ReadView
 	WriteView
