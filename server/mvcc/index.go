@@ -22,6 +22,7 @@ import (
 	"go.uber.org/zap"
 )
 
+// 在etcd中，对 Google 开源的 BTree 实现进行了一层封装，对外提供了 index 接口
 type index interface {
 	Get(key []byte, atRev int64) (rev, created revision, ver int64, err error)
 	Range(key, end []byte, atRev int64) ([][]byte, []revision)
@@ -39,6 +40,7 @@ type index interface {
 }
 
 // treeIndex 中，每个节点的 key 是一个 keyIndex 结构，etcd 通过它保存了key 与版本号的映射关系。
+// treeIndex 是v3版本存储提供的index接口实现，其中内嵌了sync.RWMutex，在进行更新操作时，例如，Insert()、Compact()方法中，都需要获取该锁。
 type treeIndex struct {
 	sync.RWMutex
 	tree *btree.BTree
@@ -47,22 +49,31 @@ type treeIndex struct {
 
 func newTreeIndex(lg *zap.Logger) index {
 	return &treeIndex{
+		// 创建 BTree 实例，这里将 BTree 的度初始化为32，
+		// 即除了根节点的每个节点至少有32个元素，每个节点最多有64个元素
 		tree: btree.New(32),
 		lg:   lg,
 	}
 }
 
+// Put 方法，其中主要完成两项操作，一是向 BTree 中添加 keyIndex 实例，二是向 keyIndex 中追加 revision 信息
 func (ti *treeIndex) Put(key []byte, rev revision) {
 	keyi := &keyIndex{key: key}
 
 	ti.Lock()
 	defer ti.Unlock()
+
+	// 通过BTree.Get()方法在 BTree 上查找指定的元素
 	item := ti.tree.Get(keyi)
 	if item == nil {
+		// 向 keyIndex 中追加一个revision
 		keyi.put(ti.lg, rev.main, rev.sub)
+
+		// 通过 BTree.ReplaceOrInsert() 方法向 BTree 中添加 keyIndex 实例
 		ti.tree.ReplaceOrInsert(keyi)
 		return
 	}
+	// 如果在BTree中查找到该Key对应的元素，则向其中追加一个revision实例
 	okeyi := item.(*keyIndex)
 	okeyi.put(ti.lg, rev.main, rev.sub)
 }
@@ -71,9 +82,12 @@ func (ti *treeIndex) Get(key []byte, atRev int64) (modified, created revision, v
 	keyi := &keyIndex{key: key}
 	ti.RLock()
 	defer ti.RUnlock()
+
+	// 查询指定 Key 对应的keyIndex实例
 	if keyi = ti.keyIndex(keyi); keyi == nil {
 		return revision{}, revision{}, 0, ErrRevisionNotFound
 	}
+	// 在查询到的 keyIndex 实例中，查找对应的 revision 信息
 	return keyi.get(ti.lg, atRev)
 }
 
@@ -96,6 +110,7 @@ func (ti *treeIndex) visit(key, end []byte, f func(ki *keyIndex) bool) {
 	ti.RLock()
 	defer ti.RUnlock()
 
+	// 调用 BTree.AscendGreaterOrEqual() 方法遍历比 key 大的元素
 	ti.tree.AscendGreaterOrEqual(keyi, func(item btree.Item) bool {
 		if len(endi.key) > 0 && !item.Less(endi) {
 			return false
@@ -146,6 +161,7 @@ func (ti *treeIndex) CountRevisions(key, end []byte, atRev int64) int {
 }
 
 func (ti *treeIndex) Range(key, end []byte, atRev int64) (keys [][]byte, revs []revision) {
+	// 如果未指定end参数，则只查询key对应的revision信息
 	if end == nil {
 		rev, _, _, err := ti.Get(key, atRev)
 		if err != nil {
@@ -153,6 +169,7 @@ func (ti *treeIndex) Range(key, end []byte, atRev int64) (keys [][]byte, revs []
 		}
 		return [][]byte{key}, []revision{rev}
 	}
+
 	ti.visit(key, end, func(ki *keyIndex) bool {
 		if rev, _, _, err := ki.get(ti.lg, atRev); err == nil {
 			revs = append(revs, rev)
@@ -257,6 +274,8 @@ func (ti *treeIndex) Equal(bi index) bool {
 
 	equal := true
 
+	// 在 BTree 中提供了 Ascend* 方法用于正序遍历 BTree 中的元素，
+	// 其中 Ascend(iterator ItemIterator) 方法会正序遍历并处理当前BTree中的所有元素
 	ti.tree.Ascend(func(item btree.Item) bool {
 		aki := item.(*keyIndex)
 		bki := b.tree.Get(item).(*keyIndex)

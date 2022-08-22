@@ -78,6 +78,7 @@ func (baseReadTx *baseReadTx) UnsafeForEach(bucket Bucket, visitor func(k, v []b
 }
 
 func (baseReadTx *baseReadTx) UnsafeRange(bucketType Bucket, key, endKey []byte, limit int64) ([][]byte, [][]byte) {
+	// 对非法的limit值进行重新设置
 	if endKey == nil {
 		// forbid duplicates for single keys
 		limit = 1
@@ -85,10 +86,15 @@ func (baseReadTx *baseReadTx) UnsafeRange(bucketType Bucket, key, endKey []byte,
 	if limit <= 0 {
 		limit = math.MaxInt64
 	}
+
+	// 只有查询safeRangeBucket(即名称为key的Bucket)时，才是真正的范围查询，否则只能返回一个值对
 	if limit > 1 && !bucketType.IsSafeRangeBucket() {
 		panic("do not use unsafeRange on non-keys bucket")
 	}
+
+	// 首先从缓存中查询键值对
 	keys, vals := baseReadTx.buf.Range(bucketType, key, endKey, limit)
+	// 检测缓存返回的键值对数量是否达到limit的限制，如果达到limit指定的上限，则直接返回缓存的查询结果
 	if int64(len(keys)) == limit {
 		return keys, vals
 	}

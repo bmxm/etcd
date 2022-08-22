@@ -21,6 +21,9 @@ import (
 	"go.etcd.io/etcd/server/v3/lease"
 )
 
+// 该结构体实现了 ReadView 接口。结构体 readView 中只有一个 kv 字段（KV 类型），
+// 结构体 readView 实现 FirstRev() 方法、Rev() 方法和 Range() 方法的方式基本类似：
+// 先调用 kv.Read() 获取只读事务（TxnRead 实例），然后调用 TxnRead 实例的对应方法完成相应操作，最后调用 TxnRead.End() 方法结束事务。
 type readView struct{ kv KV }
 
 func (rv *readView) FirstRev() int64 {
@@ -41,6 +44,8 @@ func (rv *readView) Range(ctx context.Context, key, end []byte, ro RangeOptions)
 	return tr.Range(ctx, key, end, ro)
 }
 
+// 结构体 writeView 实现了 WriteView 接口，其中也是只有一个 kv 字段（KV 类型）。
+// writeView 实现 DeleteRange()、Put()的方式与上面介绍的 readView.FirstRev() 方法等类似
 type writeView struct{ kv KV }
 
 func (wv *writeView) DeleteRange(key, end []byte) (n, rev int64) {

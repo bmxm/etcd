@@ -35,13 +35,17 @@ type RangeResult struct {
 	Count int
 }
 
+// 该接口定义了只读事务相关的视图方法
 type ReadView interface {
 	// FirstRev returns the first KV revision at the time of opening the txn.
 	// After a compaction, the first revision increases to the compaction
 	// revision.
+	// FirstRev() 方法会返回开启当前只读事务时的 revision 信息，这与Rev()方法相同，但是当进行一
+	// 次压缩操作之后，该方法的返回值会被更新成压缩时的 revision 信息，也就是压缩后的最小 revision
 	FirstRev() int64
 
 	// Rev returns the revision of the KV at the time of opening the txn.
+	// Rev()方法会返回开启当前只读事务时的revision信息
 	Rev() int64
 
 	// Range gets the keys in the range at rangeRev.
@@ -57,12 +61,15 @@ type ReadView interface {
 
 // TxnRead represents a read-only transaction with operations that will not
 // block other read transactions.
+// TxnRead 接口表示一个只读事务，其中内嵌了 ReadView 接口，并在其基础上扩展了一个End()方法，
+// 该 End() 方法用来表示当前事务已经完成，并准备提交。
 type TxnRead interface {
 	ReadView
 	// End marks the transaction is complete and ready to commit.
 	End()
 }
 
+// WriteView接口中定义了读写事务相关的方法
 type WriteView interface {
 	// DeleteRange deletes the given range from the store.
 	// A deleteRange increases the rev of the store if any key in the range exists.
@@ -82,6 +89,8 @@ type WriteView interface {
 }
 
 // TxnWrite represents a transaction that can modify the store.
+// TxnWrite 接口表示一个读写事务，其中内嵌了 TxnRead 接口和 WriteView 接口，
+// 并在两者的基础上扩展了一个 Changes() 方法，该方法会返回自事务开启之后修改的键值对信息
 type TxnWrite interface {
 	TxnRead
 	WriteView

@@ -61,6 +61,9 @@ var decoders = map[string]decoder{
 	"authUsers": authUsersDecoder,
 }
 
+// etcd在BoltDB中存储的Key是revision, Value是etcd自定义的键值对组合。也就是说，etcd会将键值对的每个版本都保存到BoltDB中，这也是etcd实现多版本机制的基础。
+// 其中，revision主要由两部分组成，第一部分是main revision，每次事务递增一；第二部分是sub revision，同一个事务中的每次操作都会递增1，两者结合就可以保证Key唯一且递增。
+// etcd提供了压缩相关的配置选项，可以定时清理陈旧键值对，同时为Put操作提供了相关参数，用于设置某个Key的历史版本数。
 type revision struct {
 	main int64
 	sub  int64

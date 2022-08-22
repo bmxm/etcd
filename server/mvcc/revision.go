@@ -61,8 +61,10 @@ hello # 第二条 get 命令的结果
 1
 
 OK # 第三条 put 命令的结果
- */
+*/
 
+// 比较创建当前 generation 实例的 revision与since
+// 先比较 main revision 部分，如果相同，则比较 sub revision 部分
 func (a revision) GreaterThan(b revision) bool {
 	if a.main > b.main {
 		return true

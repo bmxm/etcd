@@ -358,6 +358,8 @@ func (b *backend) ForceCommit() {
 	b.batchTx.Commit()
 }
 
+// backend.Snapshot()方法返回的 backend.snapshot，该结构体实现了backend.Snapshot接口，该接口中最重要的接口就是WriteTo()方法。
+// backend.snapshot 中内嵌了 bolt.Tx, backend.snapshot.WriteTo() 方法就是通过 Tx.WriteTo() 方法实现的。
 func (b *backend) Snapshot() Snapshot {
 	b.batchTx.Commit()
 
@@ -476,6 +478,10 @@ func (b *backend) Commits() int64 {
 	return atomic.LoadInt64(&b.commits)
 }
 
+// 通过名称也能看出，backend.Defrag()方法的主要功能就是整理当前 BoltDB 实例中的碎片，其实就是提高其中Bucket的填充率。
+// 整理碎片实际上是创建新的 BoltDB 数据库文件并将旧数据库文件的数据写入新数据库文件中。
+// 因为在写入新数据库文件时是顺序写入的，所以会提高填充比例（FillPercent），从而达到整理碎片的目的。
+// 需要注意的是，在整理碎片的过程中，需要持有readTx、batchTx和backend的锁。
 func (b *backend) Defrag() error {
 	return b.defrag()
 }
@@ -499,10 +505,12 @@ func (b *backend) defrag() error {
 	b.readTx.Lock()
 	defer b.readTx.Unlock()
 
+	//提交当前的批量读写事务，注意参数，此次提交后不会立即打开新的批量读写事务
 	b.batchTx.unsafeCommit(true)
 
 	b.batchTx.tx = nil
 
+	// 创建新的bolt.DB实例，对应的数据库文件是个临时文件
 	// Create a temporary file to ensure we start with a clean slate.
 	// Snapshotter.cleanupSnapdir cleans up any of these that are found during startup.
 	dir := filepath.Dir(b.db.Path())
@@ -537,6 +545,9 @@ func (b *backend) defrag() error {
 			zap.String("current-db-size-in-use", humanize.Bytes(uint64(sizeInUse1))),
 		)
 	}
+
+	// 进行碎片整理，其底层是创建一个新的BoltDB数据库文件并将当前数据库中的全部数据写入到其中，
+	// 在写入过程中，会将新Bucket的填充比例设置成90%，从而达到碎片整理的效果
 	// gofail: var defragBeforeCopy struct{}
 	err = defragdb(b.db, tmpdb, defragLimit)
 	if err != nil {
@@ -567,10 +578,12 @@ func (b *backend) defrag() error {
 	}
 	defragmentedBoltOptions.Mlock = b.mlock
 
+	// 重新创建bolt.DB实例，此时使用的数据库文件是整理之后的新数据库文件
 	b.db, err = bolt.Open(dbp, 0600, &defragmentedBoltOptions)
 	if err != nil {
 		b.lg.Fatal("failed to open database", zap.String("path", dbp), zap.Error(err))
 	}
+	// 开启新的批量读写事务以及只读事务
 	b.batchTx.tx = b.unsafeBegin(true)
 
 	b.readTx.reset()
@@ -601,7 +614,9 @@ func (b *backend) defrag() error {
 	return nil
 }
 
+// 主要完成了从旧数据库文件向新数据库文件的复制键值对的功能
 func defragdb(odb, tmpdb *bolt.DB, limit int) error {
+	// 在新数据库实例上开启一个读写事务
 	// open a tx on tmpdb for writes
 	tmptx, err := tmpdb.Begin(true)
 	if err != nil {
@@ -613,6 +628,7 @@ func defragdb(odb, tmpdb *bolt.DB, limit int) error {
 		}
 	}()
 
+	// 在旧数据库实例上开启一个只读事务
 	// open a tx on old db for read
 	tx, err := odb.Begin(false)
 	if err != nil {
@@ -620,10 +636,13 @@ func defragdb(odb, tmpdb *bolt.DB, limit int) error {
 	}
 	defer tx.Rollback()
 
+	// 获取旧实例上的Cursor，用于遍历其中的所有Bucket
 	c := tx.Cursor()
 
 	count := 0
+	// 读取旧数据库实例中的所有Bucket，并在新数据库实例上创建对应Bucket
 	for next, _ := c.First(); next != nil; next, _ = c.Next() {
+		// 获取指定的Bucket实例
 		b := tx.Bucket(next)
 		if b == nil {
 			return fmt.Errorf("backend: cannot defrag bucket %s", string(next))
@@ -633,15 +652,22 @@ func defragdb(odb, tmpdb *bolt.DB, limit int) error {
 		if berr != nil {
 			return berr
 		}
+
+		// 为提高利用率，将填充比例设置成90%，因为下面会从读取旧Bucket中全部的键值对，
+		// 并填充到新Bucket中，这个过程是顺序写入的
 		tmpb.FillPercent = 0.9 // for bucket2seq write in for each
 
+		// 遍历旧Bucket中的全部键值对
 		if err = b.ForEach(func(k, v []byte) error {
 			count++
 			if count > limit {
+				// 当读取的键值对数量超过阈值，则提交当前读写事务(新数据库)
 				err = tmptx.Commit()
 				if err != nil {
 					return err
 				}
+
+				// 重新开启一个读写事务，继续后面的写入操作
 				tmptx, err = tmpdb.Begin(true)
 				if err != nil {
 					return err
@@ -660,6 +686,7 @@ func defragdb(odb, tmpdb *bolt.DB, limit int) error {
 	return tmptx.Commit()
 }
 
+// 开启新的只读事务或读写事务都是通过 backend.begin() 方法实现的，该方法除了会开启事务（根据参数决定开启哪种类型的事务），还会更新backend中的相关字段
 func (b *backend) begin(write bool) *bolt.Tx {
 	b.mu.RLock()
 	tx := b.unsafeBegin(write)
@@ -668,6 +695,8 @@ func (b *backend) begin(write bool) *bolt.Tx {
 	size := tx.Size()
 	db := tx.DB()
 	stats := db.Stats()
+
+	// 更新backend.size字段，记录了当前数据库的大小
 	atomic.StoreInt64(&b.size, size)
 	atomic.StoreInt64(&b.sizeInUse, size-(int64(stats.FreePageN)*int64(db.Info().PageSize)))
 	atomic.StoreInt64(&b.openReadTxN, int64(stats.OpenTxN))
