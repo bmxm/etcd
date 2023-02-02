@@ -20,6 +20,14 @@ import pb "go.etcd.io/etcd/raft/v3/raftpb"
 // Note that unstable.offset may be less than the highest log
 // position in storage; this means that the next write to storage
 // might need to truncate the log before persisting unstable.entries.
+//
+// 在etcd-raft模块中，除了上面介绍的Storage，还有一个存储 Entry 记录的地方，就是 unstable 结构体。
+// unstable 使用内存数组维护其中所有的 Entry 记录，对于 Leader 节点而言，它维护了客户端请求对应的Entry记录；
+// 对于 Follower 节点而言，它维护的是从 Leader 节点复制来的 Entry 记录。无论是 Leader 节点还是 Follower 节点，
+// 对于刚刚接收到的 Entry 记录首先都会被存储在 unstable 中。然后按照 Raft 协议将 unstable 中缓存的这些 Entry 记录交给上层模块进行处理，
+// 上层模块会将这些Entry记录发送到集群其他节点或进行保存（写入Storage中）。
+// 之后，上层模块会调用 Advance() 方法通知底层的 etcd-raft 模块将 unstable 中对应的Entry记录删除（因为已经保存到了Storage中）。
+// 正因为 unstable 中保存的 Entry 记录并未进行持久化，可能会因节点故障而意外丢失，所以被称为 unstable。
 type unstable struct {
 	// the incoming unstable snapshot, if any.
 	snapshot *pb.Snapshot

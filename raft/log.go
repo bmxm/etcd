@@ -21,20 +21,31 @@ import (
 	pb "go.etcd.io/etcd/raft/v3/raftpb"
 )
 
+// Raft 协议中日志复制部分的核心就是在集群中各个节点之间完成日志的复制，
+// 因此在 etcd-raft 模块的实现中使用 raftLog 结构来管理节点上的日志，
+// 它依赖于前面介绍的 Storage 接口和 unstable 结构体。
+
 type raftLog struct {
 	// storage contains all stable entries since the last snapshot.
+	// 实际上就是前面介绍的MemoryStorage实例，其中存储了快照数据及该快照之后的Entry记录。
+	// 在有的文档中，也将该 MemoryStorage 实例称为“stable storage”。
 	storage Storage
 
 	// unstable contains all unstable entries and snapshot.
 	// they will be saved into storage.
+	// 用于存储未写入Storage的快照数据及Entry记录。
 	unstable unstable
 
 	// committed is the highest log position that is known to be in
 	// stable storage on a quorum of nodes.
+	// 已提交的位置，即已提交的Entry记录中最大的索引值。
 	committed uint64
+
 	// applied is the highest log position that the application has
 	// been instructed to apply to its state machine.
 	// Invariant: applied <= committed
+	// 已应用的位置，即已应用的Entry记录中最大的索引值。
+	// 其中 committed 和 applied 之间始终满足 applied ≤ committed 这个不等式关系。
 	applied uint64
 
 	logger Logger
@@ -57,11 +68,15 @@ func newLogWithSize(storage Storage, logger Logger, maxNextEntsSize uint64) *raf
 	if storage == nil {
 		log.Panic("storage must not be nil")
 	}
+
+	// 创建raftLog实例，并初始化storage字段
 	log := &raftLog{
 		storage:         storage,
 		logger:          logger,
 		maxNextEntsSize: maxNextEntsSize,
 	}
+
+	// 获取 Storage 中的第一条 Entry 和最后一条 Entry 的索引值
 	firstIndex, err := storage.FirstIndex()
 	if err != nil {
 		panic(err) // TODO(bdarnell)

@@ -113,8 +113,10 @@ func (st StateType) String() string {
 }
 
 // Config contains the parameters to start a raft.
+// 主要用于配置参数的传递，在创建 raft 实例时需要的参数会通过 Config 实例传递进去
 type Config struct {
 	// ID is the identity of the local raft. ID cannot be 0.
+	// 当前节点ID
 	ID uint64
 
 	// ElectionTick is the number of Node.Tick invocations that must pass between
@@ -123,21 +125,25 @@ type Config struct {
 	// candidate and start an election. ElectionTick must be greater than
 	// HeartbeatTick. We suggest ElectionTick = 10 * HeartbeatTick to avoid
 	// unnecessary leader switching.
+	// 用于初始化 raft.electionTimeout，即逻辑时钟连续推进多少次后，就会触发 Follower 节点的状态切换及新一轮的 Leader 选举。
 	ElectionTick int
 	// HeartbeatTick is the number of Node.Tick invocations that must pass between
 	// heartbeats. That is, a leader sends heartbeat messages to maintain its
 	// leadership every HeartbeatTick ticks.
+	// 用于初始化 raft.heartbeatTimeout，即逻辑时钟连续推进多少次后，就触发Leader 节点发送心跳消息。
 	HeartbeatTick int
 
 	// Storage is the storage for raft. raft generates entries and states to be
 	// stored in storage. raft reads the persisted entries and states out of
 	// Storage when it needs. raft reads out the previous state and configuration
 	// out of storage when restarting.
+	// 当前节点保存 raft 日志记录使用的存储
 	Storage Storage
 	// Applied is the last applied index. It should only be set when restarting
 	// raft. raft will not return entries to the application smaller or equal to
 	// Applied. If Applied is unset when restarting, raft might return previous
 	// applied entries. This is a very application dependent configuration.
+	// 当前已经应用的记录位置（已应用的最后一条 Entry 记录的索引值），该值在节点重启时需要设置，否则会重新应用已经应用过 Entry 记录。
 	Applied uint64
 
 	// MaxSizePerMsg limits the max byte size of each append message. Smaller
@@ -145,6 +151,8 @@ type Config struct {
 	// during normal operation). On the other side, it might affect the
 	// throughput during normal replication. Note: math.MaxUint64 for unlimited,
 	// 0 for at most one entry per message.
+	// 用于初始化 raft.maxMsgSize 字段，每条消息的最大字节数，
+	// 如果是 math.MaxUint64 则没有上限，如果是0则表示每条消息最多携带一条 Entry。
 	MaxSizePerMsg uint64
 	// MaxCommittedSizePerReady limits the size of the committed entries which
 	// can be applied.
@@ -159,15 +167,18 @@ type Config struct {
 	// has its own sending buffer over TCP/UDP. Setting MaxInflightMsgs to avoid
 	// overflowing that sending buffer. TODO (xiangli): feedback to application to
 	// limit the proposal rate?
+	// 用于初始化 raft.maxInflight，即已经发送出去且未收到响应的最大消息个数。
 	MaxInflightMsgs int
 
 	// CheckQuorum specifies if the leader should check quorum activity. Leader
 	// steps down when quorum is not active for an electionTimeout.
+	// 是否开启 CheckQuorum 模式，用于初始化 raft.checkQuorum 字段
 	CheckQuorum bool
 
 	// PreVote enables the Pre-Vote algorithm described in raft thesis section
 	// 9.6. This prevents disruption when a node that has been partitioned away
 	// rejoins the cluster.
+	// 是否开启 PreVote 模式，用于初始化 raft.preVote 字段
 	PreVote bool
 
 	// ReadOnlyOption specifies how the read only request is processed.
@@ -181,6 +192,7 @@ type Config struct {
 	// should (clock can move backward/pause without any bound). ReadIndex is not safe
 	// in that case.
 	// CheckQuorum MUST be enabled if ReadOnlyOption is ReadOnlyLeaseBased.
+	// 与只读请求的处理相关
 	ReadOnlyOption ReadOnlyOption
 
 	// Logger is the logger used for raft log. For multinode which can host
@@ -240,33 +252,51 @@ func (c *Config) validate() error {
 	return nil
 }
 
+// raft结构体是 etcd-raft 模块中的核心数据结构，其中封装了当前 节点 的所有核心数据。
 type raft struct {
+	// 当前节点在集群中的 ID
 	id uint64
 
+	// 当前任期号
+	// 如果Message的Term字段为0，则表示该消息是本地消息，例如，后面提到的 MsgHup、MsgProp、MsgReadIndex 等消息，都属于本地消息。
 	Term uint64
+
+	// 当前任期中当前节点将选票投给了哪个节点
 	Vote uint64
 
 	readStates []ReadState
 
 	// the log
+	// 在Raft协议中的每个节点都会记录本地Log，在etcd-raft模块中，使用结构体raftLog表示本地Log，在raftLog中还涉及日志的缓存等相关内容
 	raftLog *raftLog
 
+	// 单条消息的最大字节数。
 	maxMsgSize         uint64
 	maxUncommittedSize uint64
+
+	// 过时？？？？
+	// Leader 节点会记录集群中其他节点的日志复制情况（NextIndex 和 MatchIndex）。
+	// 在 etcd-raft 模块中，每个 Follower 节点对应的 NextIndex 值和 MatchIndex 值都封装在 Progress 实例中，
+	// 除此之外，每个 Progress 实例中还封装了对应 Follower 节点的相关信息。
+
 	// TODO(tbg): rename to trk.
 	prs tracker.ProgressTracker
 
+	// 当前节点在集群中的角色
 	state StateType
 
 	// isLearner is true if the local raft node is a learner.
 	isLearner bool
 
+	// 缓存了当前节点等待发送的消息
 	msgs []pb.Message
 
 	// the leader id
+	// 当前集群中Leader节点的ID。
 	lead uint64
 	// leadTransferee is id of the leader transfer target when its value is not zero.
 	// Follow the procedure defined in raft thesis 3.10.
+	// 用于集群中 Leader 节点的转移，leadTransferee 记录了此次 Leader 角色转移的目标节点的ID。
 	leadTransferee uint64
 	// Only one conf change may be pending (in the log, but not yet
 	// applied) at a time. This is enforced via pendingConfIndex, which
@@ -280,30 +310,58 @@ type raft struct {
 	// term changes.
 	uncommittedSize uint64
 
+	// 与只读请求相关
 	readOnly *readOnly
 
 	// number of ticks since it reached last electionTimeout when it is leader
 	// or candidate.
 	// number of ticks since it reached last electionTimeout or received a
 	// valid message from current leader when it is a follower.
+	// 选举计时器的指针，其单位是逻辑时钟的刻度，逻辑时钟每推进一次，该字段值就会增加1。
 	electionElapsed int
 
 	// number of ticks since it reached last heartbeatTimeout.
 	// only leader keeps heartbeatElapsed.
 	heartbeatElapsed int
 
+	// Raft协议中，Leader 节点只有在收到更大 Term 值的消息时才会切换成 Follower 状态。
+	// 故在发生网络分区时，即使在其他分区里新的 Leader 节点已经被选举出来，
+	// 旧的 Leader 节点由于接收不到新 Leader 节点的心跳消息，
+	// 依然会认为自己是当前集群的 Leader 节点（与其同一网络分区的 Follower 节点也认为它是当前集群的 Leader 节点），
+	// 它依然会接收客户端的请求，但无法向客户端返回任何响应。
+	// CheckQuorum 机制的意思是：每隔一段时间，Leader 节点会尝试连接集群中的其他节点（发送心跳消息），
+	// 如果发现自己可以连接到节点个数没有超过半数（即没有收到足够的心跳响应），则主动切换成 Follower状态。
+	// 这样，在上述网络分区的场景中，旧的 Leader 节点可以很快知道自己已经过期，可以减少Client连接旧Leader节点的等待时间。
 	checkQuorum bool
-	preVote     bool
+	// Raft协议中，Follower 节点在选举计时器超时之后，会切换成 Candidate 状态并发起选举。
+	// 然而 Follower 节点超时没有收到心跳消息时，也可能是由于 Follower 节点自身的网络问题导致的，
+	// 例如，前面提到的网络分区的场景。即使如此，该 Follower 节点还是会不断地发起选举，其Term值也会不断递增。
+	// 待该 Follower 节点的网络故障恢复并收到 Leader 节点的心跳消息时，由于其 Term 值已经增加，
+	// 该 Follower 节点会丢弃掉 Term 值比其自身小的心跳消息，之后就会触发一次没有必要进行的 Leader 选举。
+	// 在前面介绍Raft协议时也提到了 PreVote 优化避免上述情况，当 Follower 节点准备发起一次选举之前，
+	// 会先连接集群中的其他节点，并询问它们是否愿意参与选举，如果集群中的其他节点能够正常收到Leader节点的心跳消息，
+	// 则会拒绝参与选举，反之则参与选举。当在 PreVote 过程中，有超过半数的节点响应并参与新一轮选举，则可以发起新一轮的选举。
+	preVote bool
 
+	// 心跳超时时间，当 heartbeatElapsed 字段值到达该值时，就会触发Leader节点发送一条心跳消息。
 	heartbeatTimeout int
-	electionTimeout  int
+	// 选举超时时间，当 electionElapsed 字段值到达该值时，就会触发新一轮的选举。
+	electionTimeout int
 	// randomizedElectionTimeout is a random number between
 	// [electiontimeout, 2 * electiontimeout - 1]. It gets reset
 	// when raft changes its state to follower or candidate.
+	// 该字段是 electiontimeout～2×electiontimeout-1 之间的随机值，也是选举计时器的上限，当 electionElapsed 超过该值时即为超时。
 	randomizedElectionTimeout int
 	disableProposalForwarding bool
 
+	// 当前节点推进逻辑时钟的函数。
+	// 如果当前节点是 Leader，则指向 raft.tickHeartbeat() 函数，
+	// 如果当前节点是 Follower 或是 Candidate，则指向 raft.tickElection() 函数。
 	tick func()
+	// 当前节点收到消息时的处理函数。\
+	// 如果是 Leader 节点，则该字段指向 stepLeader() 函数，
+	// 如果是 Follower 节点，则该字段指向 stepFollower() 函数，
+	// 如果是处于 preVote 阶段的节点或是 Candidate 节点，则该字段指向 stepCandidate() 函数。
 	step stepFunc
 
 	logger Logger
@@ -316,10 +374,15 @@ type raft struct {
 }
 
 func newRaft(c *Config) *raft {
+	// 检测参数 Config 中各个字段的合法性
 	if err := c.validate(); err != nil {
 		panic(err.Error())
 	}
+
+	// 创建 raftLog 实例，用于记录 Entry 记录
 	raftlog := newLogWithSize(c.Storage, c.Logger, c.MaxCommittedSizePerReady)
+	// 获取raftLog.storage的初始状态(HardState和ConfState)
+	// Storage 的初始状态是通过本地 Entry 记录回放得到的
 	hs, cs, err := c.Storage.InitialState()
 	if err != nil {
 		panic(err) // TODO(bdarnell)
@@ -351,12 +414,17 @@ func newRaft(c *Config) *raft {
 	}
 	assertConfStatesEquivalent(r.logger, cs, r.switchToConfig(cfg, prs))
 
+	// 根据从Storage中获取的HardState，初始化raftLog.committed字段，以及raft.Term和Vote字段
 	if !IsEmptyHardState(hs) {
 		r.loadState(hs)
 	}
+
+	// 如果 Config 中配置了 Applied，则将 raftLog.applied 字段重置为指定的Applied值
+	// 上层模块自己的控制正确的已应用位置时使用该配置
 	if c.Applied > 0 {
 		raftlog.appliedTo(c.Applied)
 	}
+	// 当前节点切换成 Follower 状态
 	r.becomeFollower(r.Term, None)
 
 	var nodesStrs []string

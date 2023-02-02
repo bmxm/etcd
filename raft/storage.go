@@ -43,36 +43,59 @@ var ErrSnapshotTemporarilyUnavailable = errors.New("snapshot is temporarily unav
 // If any Storage method returns an error, the raft instance will
 // become inoperable and refuse to participate in elections; the
 // application is responsible for cleanup and recovery in this case.
+// 主要作用就是存储当前节点接收到的 Entry 记录
 type Storage interface {
 	// TODO(tbg): split this into two interfaces, LogStorage and StateStorage.
 
 	// InitialState returns the saved HardState and ConfState information.
+	// 返回 Storage 中记录的状态信息，返回的是 HardState 实例和 ConfState 实例
+	// 在前面介绍 Raft 协议时提到，集群中每个节点都需要保存一些必需的基本信息，在 etcd 中将其
+	// 封装成 HardState，其中主要封装了当前任期号（Term 字段）、当前节点在该任期中将选票投
+	// 给了哪个节点（Vote字段）、已提交Entry记录的位置（Commit字段，即最后一条已提交记录 的索引值）
+	// ConfState中封装了当前集群中所有节点的ID（Nodes字段）
 	InitialState() (pb.HardState, pb.ConfState, error)
+
 	// Entries returns a slice of log entries in the range [lo,hi).
 	// MaxSize limits the total size of the log entries returned, but
 	// Entries returns at least one entry if any.
+	// 在Storage中记录了当前节点的所有Entry记录，Entries方法返回指定范围的Entry 记录([lo, hi))，
+	// 第三个参数(maxSize)限定了返回的Entry集合的字节数上限
 	Entries(lo, hi, maxSize uint64) ([]pb.Entry, error)
+
 	// Term returns the term of entry i, which must be in the range
 	// [FirstIndex()-1, LastIndex()]. The term of the entry before
 	// FirstIndex is retained for matching purposes even though the
 	// rest of that entry may not be available.
+	// 查询指定Index对应的 Entry 的 Term
 	Term(i uint64) (uint64, error)
+
 	// LastIndex returns the index of the last entry in the log.
+	// 该方法返回Storage中记录的第一条Entry的索引值(Index)
 	LastIndex() (uint64, error)
+
 	// FirstIndex returns the index of the first log entry that is
 	// possibly available via Entries (older entries have been incorporated
 	// into the latest Snapshot; if storage only contains the dummy entry the
 	// first log entry is not available).
+	// 该方法返回Storage中记录的第一条Entry的索引值(Index)，在该Entry之前的所有
+	// Entry都已经被包含进了最近的一次SnapShot
 	FirstIndex() (uint64, error)
+
 	// Snapshot returns the most recent snapshot.
 	// If snapshot is temporarily unavailable, it should return ErrSnapshotTemporarilyUnavailable,
 	// so raft state machine could know that Storage needs some time to prepare
 	// snapshot and call Snapshot later.
+	// 返回最近一次生成的快照数据
 	Snapshot() (pb.Snapshot, error)
 }
 
 // MemoryStorage implements the Storage interface backed by an
 // in-memory array.
+// MemoryStorage 是 etcd-raft 模块为 Storage 接口提供的一个实现，
+// 从名字也能看出，MemoryStorage 在内存中维护上述状态信息（hardState字段）、快照数据（snapshot字段）
+// 及所有的Entry记录（ents字段，[]raftpb.Entry类型），
+// 在MemoryStorage.ents字段中维护了快照数据之后的所有Entry记录。
+// 另外需要注意的是，MemoryStorage 继承了 sync.Mutex, MemoryStorage 中的大部分操作是需要加锁同步的。
 type MemoryStorage struct {
 	// Protects access to all fields. Most methods of MemoryStorage are
 	// run on the raft goroutine, but Append() is run on an application
