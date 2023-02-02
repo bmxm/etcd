@@ -27,7 +27,10 @@ const _ = proto.ProtoPackageIsVersion3 // please upgrade the proto package
 type EntryType int32
 
 const (
+	// 普通数据操作
 	EntryNormal       EntryType = 0
+
+	// 集群变更操作
 	EntryConfChange   EntryType = 1
 	EntryConfChangeV2 EntryType = 2
 )
@@ -263,7 +266,16 @@ func (ConfChangeType) EnumDescriptor() ([]byte, []int) {
 	return fileDescriptor_b042552c306ae59b, []int{3}
 }
 
+// Entry 记录：Raft 协议中，节点之间传递的是消息（Message），每条消息中可以携带多条Entry记录，每条Entry记录对应一个独立的操作
 type Entry struct {
+	// Term: 该 Entry 所在的任期号
+	// Index: 该 Entry 对应的索引号
+	// Type: 该 Entry 记录的类型
+	// Data：具体操作使用的数据
+
+	// 另外，在每个节点中记录的本地Log的基本单位也是Entry记录。
+	// 有的文章也会将Entry记录称为“日志记录”，在etcd中还有一个 WAL 日志的概念，这两者并非完全等价。
+
 	Term  uint64    `protobuf:"varint,2,opt,name=Term" json:"Term"`
 	Index uint64    `protobuf:"varint,3,opt,name=Index" json:"Index"`
 	Type  EntryType `protobuf:"varint,1,opt,name=Type,enum=raftpb.EntryType" json:"Type"`
@@ -380,7 +392,21 @@ func (m *Snapshot) XXX_DiscardUnknown() {
 
 var xxx_messageInfo_Snapshot proto.InternalMessageInfo
 
+// 在etcd-raft模块的实现中， Message是所有消息的抽象，包括了各种类型消息所需要的字段
 type Message struct {
+	// Type: 定义了消息类型，etcd-raft 的实现中就是通过该字段区分不同的消息并进行分类处理的
+	// To:消息的目标节点ID。在集群中，每个节点都拥有一个唯一ID作为标识。
+	// From: 发送消息的节点ID。
+	// Term: 发送消息的节点的Term值。如果Term值为0，则为本地消息，在etcd-raft模块的实现中，对本地消息进行特殊处理。例如，后面见到的MsgHup类型消息就是本地消息的一种。
+	// Entries: 如果是MsgApp类型的消息，则该字段中保存了Leader节点复制到Follower节点的Entry记录。
+	// LogTerm: 该消息携带的第一条Entry记录的Term值。
+	// Index: 记录了一个索引值，该索引值的具体含义与消息的类型相关。例如，MsgApp消息的Index字段保存了其携带的Entry记录（即Entries字段）中前一条记录的Index值，而MsgAppResp消息的Index字段则是Follower节点提示Leader节点下次从哪个位置开始发送Entry记录。
+	// Commit: 消息发送节点的提交位置（commitIndex）。
+	// Snapshot: 在传输快照时，该字段保存了快照数据。
+	// Reject: 要用于响应类型的消息，表示是否拒绝收到的消息。例如， Follower节点收到Leader节点发来的MsgApp消息，如果Follower节点发现MsgApp消息携带的Entry记录并不能直接追加到本地的raftLog中，则会将响应消息的Reject字段设置为true，并且会在RejectHint字段中记录合适的Entry索引值，供Leader节点参考。
+	// RejectHint: 在Follower节点拒绝Leader节点的消息之后，会在该字段记录一个Entry索引值供Leader节点。
+	// Context: 消息携带的一些上下文信息。例如，该消息是否与Leader节点转移相关。
+
 	Type MessageType `protobuf:"varint,1,opt,name=type,enum=raftpb.MessageType" json:"type"`
 	To   uint64      `protobuf:"varint,2,opt,name=to" json:"to"`
 	From uint64      `protobuf:"varint,3,opt,name=from" json:"from"`

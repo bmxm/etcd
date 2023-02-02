@@ -122,6 +122,12 @@ func (rd Ready) appliedCursor() uint64 {
 	return 0
 }
 
+// Node：对etcd-raft模块具体实现的一层封装，方便上层模块使用etcd-raft模块。
+// 上层模块：etcd-raft模块的调用者，上层模块通过Node提供的API与底层的etcd-raft模块进行交互。
+// Cluster：表示一个集群，其中记录了该集群的基础信息。
+// Member：组成Cluster的元素之一，其中封装了一个节点的基本信息。
+// Peer：集群中某个节点对同一集群中另外一个节点的称呼。
+
 // Node represents a node in a raft cluster.
 type Node interface {
 	// Tick increments the internal logical clock for the Node by a single tick. Election
