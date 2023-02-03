@@ -57,21 +57,30 @@ func NewQuotaKVServer(s *etcdserver.EtcdServer) pb.KVServer {
 }
 
 // Put 方法的调用过程，可以列出如下的主要方法：
+// Quota 配额模块
 // quotaKVServer.Put() api/v3rpc/quota.go 首先检查是否满足需求
-//  |-quotoAlarm.check() 检查
-//  |-KVServer.Put() api/v3rpc/key.go 真正的处理请求
-//  |-checkPutRequest() 校验请求参数是否合法
-//  |-RaftKV.Put() etcdserver/v3_server.go 处理请求
-//  |=EtcdServer.Put() 实际调用的是该函数
-//    |-raftRequest()
-//    |-raftRequestOnce()
-//    |-processInternalRaftRequestOnce() 真正开始处理请求
-//    |-context.WithTimeout() 创建超时的上下文信息
-//    |-raftNode.Propose() raft/node.go
-//    |-raftNode.step() 对于类型为 MsgProp 类型消息，向 propc 通道中传入数据
-//  |-header.fill() etcdserver/api/v3rpc/header.go 填充响应的头部信息
+//
+//	|-quotoAlarm.check() 检查
+//	|-KVServer.Put() api/v3rpc/key.go 真正的处理请求
+//	|-checkPutRequest() 校验请求参数是否合法
+//	|-RaftKV.Put() etcdserver/v3_server.go 处理请求
+//	|=EtcdServer.Put() 实际调用的是该函数
+//	  |-raftRequest()
+//	  |-raftRequestOnce()
+//	  |-processInternalRaftRequestOnce() 真正开始处理请求
+//	  |-context.WithTimeout() 创建超时的上下文信息
+//	  |-raftNode.Propose() raft/node.go
+//	  |-raftNode.step() 对于类型为 MsgProp 类型消息，向 propc 通道中传入数据
+//	|-header.fill() etcdserver/api/v3rpc/header.go 填充响应的头部信息
 func (s *quotaKVServer) Put(ctx context.Context, r *pb.PutRequest) (*pb.PutResponse, error) {
 	// check方法将检查请求是否满足配额。如果空间不足，将会忽略请求并发出可用空间不足的警报。
+	// etcdserver: mvcc: database space exceeded
+	// 另：db 默认配额是 2G (社区建议不超过 8G)
+	// 另：etcd 3.2.10 之前的旧版本，备份可能会触发 boltdb 的一个 Bug, 会导致 db 大小不断上涨，最终达到配额限制。
+	//
+	// 如果超过了配额，它会产生一个告警（Alarm）请求，告警类型是 NO SPACE，
+	// 并通过 Raft 日志同步给其它节点，告知 db 无空间了，并将告警持久化存储到 db 中。
+	// 最终，无论是 API 层 gRPC 模块还是负责将 Raft 侧已提交的日志条目应用到状态机的 Apply 模块，都拒绝写入，集群只读。
 	if err := s.qa.check(ctx, r); err != nil {
 		return nil, err
 	}

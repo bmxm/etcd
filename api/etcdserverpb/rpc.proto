@@ -13,6 +13,8 @@ option (gogoproto.unmarshaler_all) = true;
 
 
 service KV {
+  // client 端通过负载均衡算法选择一个 etcd 节点，发起 gRPC 调用。
+
   //  拦截器提供了在执行一个请求前后的 hook 能力，除了 debug 日志、metrics 统计、对 etcd Learner 节点请求接口和参数限制等能力，
   //  etcd 还基于它实现了以下特性:要求执行一个操作前集群必须有 Leader；请求延时超过指定阈值的，打印包含来源 IP 的慢查询日志 (3.5 版本)。
   //  server 收到 client 的 Range RPC 请求后，根据 ServiceName 和 RPC Method 将请求转发到对应的 handler 实现，
@@ -31,7 +33,18 @@ service KV {
     };
   }
 
+  // 更新时：
+  // etcd 节点收到请求后经过 gRPC 拦截器、Quota模块后，进入 KVServer 模块，
+  // KVServer 模块像 Raft 模块提交一个提案，提案内容为“大家好，请使用 put 方法执行一个 key 为 hello，value 为 world 的命令”。
 
+  // 随后，提案通过 raft-http 网络模块转发、经过集群多数节点持久化后，状态会变成已提交，
+  // etcd-server 从 raft 模块获取已提交的日志条目，传递给 apply 模块，apply 模块通过 mvcc 模块执行提案内容，更新状态机。
+
+  // 细节1：
+  // 与读流程不一样的是写流程还涉及 Quota、WAL、Apply 三个模块。
+  // crash-safe 及幂等性也正是基于 WAL 和 Apply 流程的 consistent index 等实现的.
+
+  // 细节2：
   // 当 client 发起一个更新 hello 为 world 请求后，若 Leader 收到写请求，它会将此请求持久化到 WAL 日志，并广播给各个节点,
   // 若一半以上节点持久化成功，则该请求对应的日志条目被标识为已提交，etcd server 模块异步从 Raft 模块获取已提交的日志条目，应用到状态机 (boltdb 等)。
 

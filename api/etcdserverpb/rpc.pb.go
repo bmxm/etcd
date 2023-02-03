@@ -6504,9 +6504,16 @@ func (c *kVClient) Compact(ctx context.Context, in *CompactionRequest, opts ...g
 type KVServer interface {
 	// Range gets the keys in the range from the key-value store.
 	Range(context.Context, *RangeRequest) (*RangeResponse, error)
+
 	// Put puts the given key into the key-value store.
 	// A put request increments the revision of the key-value store
 	// and generates one event in the event history.
+	//
+	// 本地启动 etcd 代码，调用 put 接口：
+	// ./server/etcdserver/
+	// 1. quota.go: quotaKVServer.Put(ctx context.Context, r *pb.PutRequest)
+	// 2. api/v3rpc/key.go: kvServer.Put(ctx context.Context, r *pb.PutRequest)
+	// 3. v3_server.EtcdServer.Put(ctx context.Context, r *pb.PutRequest)
 	Put(context.Context, *PutRequest) (*PutResponse, error)
 	// DeleteRange deletes the given range from the key-value store.
 	// A delete request increments the revision of the key-value store

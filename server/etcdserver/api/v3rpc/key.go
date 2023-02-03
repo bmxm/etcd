@@ -68,6 +68,8 @@ func (s *kvServer) Range(ctx context.Context, r *pb.RangeRequest) (*pb.RangeResp
 }
 
 // Put 操作用于插入或者更新指定的键值对。
+//
+// 再前面的配额检查后，请求就从 API 层转发到了 KVServer 模块的 put 方法
 func (s *kvServer) Put(ctx context.Context, r *pb.PutRequest) (*pb.PutResponse, error) {
 	if err := checkPutRequest(r); err != nil {
 		return nil, err
