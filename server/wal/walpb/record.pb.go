@@ -25,7 +25,12 @@ var _ = math.Inf
 // proto package needs to be updated.
 const _ = proto.ProtoPackageIsVersion3 // please upgrade the proto package
 
+// Record: 在WAL日志文件中，日志记录是通过Record表示的，该结构体通过Protocol Buffers生成，主要用于序列化和反序列化日志记录
 type Record struct {
+	// Type: Record 实例的类型 (如：wal.go 中的 metadataType 等？)
+	// Crc: Record 实例的校验码
+	// Data: 记录真正的日志数据，根据日志的类型不同，Data 字段中保存的数据也有所不同。
+
 	Type                 int64    `protobuf:"varint,1,opt,name=type" json:"type"`
 	Crc                  uint32   `protobuf:"varint,2,opt,name=crc" json:"crc"`
 	Data                 []byte   `protobuf:"bytes,3,opt,name=data" json:"data,omitempty"`

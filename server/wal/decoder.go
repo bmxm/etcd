@@ -33,12 +33,18 @@ const minSectorSize = 512
 const frameSizeBytes = 8
 
 type decoder struct {
-	mu  sync.Mutex
+	// 在decoder开始读取日志文件时，需要加锁同步
+	mu sync.Mutex
+
+	// decoder 实例通过该字段中记录的 Reader 实例读取相应的日志文件，这些日志文件就是在前面介绍的 wal.openAtIndex() 方法中打开的日志文件。
 	brs []*bufio.Reader
 
 	// lastValidOff file offset following the last valid decoded record
+	// 读取日志记录的指针。
 	lastValidOff int64
-	crc          hash.Hash32
+
+	// 校验码
+	crc hash.Hash32
 }
 
 func newDecoder(r ...io.Reader) *decoder {
@@ -65,30 +71,43 @@ func (d *decoder) decode(rec *walpb.Record) error {
 const maxWALEntrySizeLimit = int64(10 * 1024 * 1024)
 
 func (d *decoder) decodeRecord(rec *walpb.Record) error {
+	// 检测 brs 字段长度，决定是否还有日志文件需要读取
 	if len(d.brs) == 0 {
 		return io.EOF
 	}
 
+	// 读取第一个日志文件中的第一个日志记录的长度
 	l, err := readInt64(d.brs[0])
+	// 是否读到文件尾，或是读取到了预分配的部分，这都表示读取操作结束
 	if err == io.EOF || (err == nil && l == 0) {
 		// hit end of file or preallocated space
+		// 更新brs字段，将其中第一个日志文件对应的Reader清除掉
 		d.brs = d.brs[1:]
+
+		// 如果后面没有其他日志文件可读则返回EOF异常，表示读取正常结束
 		if len(d.brs) == 0 {
 			return io.EOF
 		}
+
+		// 若后续还有其他日志文件待读取，则需要切换文件，这里会重置 lastValidOff
 		d.lastValidOff = 0
+
+		// 递归调用 decodeRecord() 方法
 		return d.decodeRecord(rec)
 	}
 	if err != nil {
 		return err
 	}
 
+	// 计算当前日志记录的实际长度及填充数据的长度，并创建相应的data切片
 	recBytes, padBytes := decodeFrameSize(l)
 	if recBytes >= maxWALEntrySizeLimit-padBytes {
 		return ErrMaxWALEntrySizeLimitExceeded
 	}
 
 	data := make([]byte, recBytes+padBytes)
+	// 从日志文件中读取指定长度的字节数如果读取不到指定的字节数，则会返回EOF异常，
+	// 此时认为读取到了写入一半的日志记录，需要返回ErrUnexpectedEOF异常
 	if _, err = io.ReadFull(d.brs[0], data); err != nil {
 		// ReadFull returns io.EOF only if no bytes were read
 		// the decoder should treat this as an ErrUnexpectedEOF instead.
@@ -97,6 +116,8 @@ func (d *decoder) decodeRecord(rec *walpb.Record) error {
 		}
 		return err
 	}
+
+	// 将0~recBytes反序列化成Record
 	if err := rec.Unmarshal(data[:recBytes]); err != nil {
 		if d.isTornEntry(data) {
 			return io.ErrUnexpectedEOF
@@ -114,7 +135,9 @@ func (d *decoder) decodeRecord(rec *walpb.Record) error {
 			return err
 		}
 	}
+
 	// record decoded as valid; point last valid offset to end of record
+	// 将lastValidOff后移，准备读取下一条日志记录
 	d.lastValidOff += frameSizeBytes + recBytes + padBytes
 	return nil
 }
