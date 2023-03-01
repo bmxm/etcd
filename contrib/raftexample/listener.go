@@ -22,6 +22,8 @@ import (
 
 // stoppableListener sets TCP keep-alive timeouts on accepted
 // connections and waits on stopc message
+//
+// 该实例内嵌了 TCPListener，也就实现了 not.Listener 接口
 type stoppableListener struct {
 	*net.TCPListener
 	stopc <-chan struct{}
@@ -35,10 +37,12 @@ func newStoppableListener(addr string, stopc <-chan struct{}) (*stoppableListene
 	return &stoppableListener{ln.(*net.TCPListener), stopc}, nil
 }
 
+// 重写 TCPListener.Accept() 方法
 func (ln stoppableListener) Accept() (c net.Conn, err error) {
 	connc := make(chan *net.TCPConn, 1)
 	errc := make(chan error, 1)
 	go func() {
+		// 启动一个单独的 goroutine 来接收新连接
 		tc, err := ln.AcceptTCP()
 		if err != nil {
 			errc <- err
@@ -52,6 +56,7 @@ func (ln stoppableListener) Accept() (c net.Conn, err error) {
 	case err := <-errc:
 		return nil, err
 	case tc := <-connc:
+		// 接收到新连接，设置 KeepAlive 等连接属性
 		tc.SetKeepAlive(true)
 		tc.SetKeepAlivePeriod(3 * time.Minute)
 		return tc, nil

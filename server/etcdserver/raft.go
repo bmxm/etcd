@@ -80,6 +80,7 @@ type apply struct {
 	notifyc chan struct{}
 }
 
+// 充当 etcd-raft 模块与上层模块之间交互的桥梁
 type raftNode struct {
 	lg *zap.Logger
 
@@ -87,36 +88,54 @@ type raftNode struct {
 	raftNodeConfig
 
 	// a chan to send/receive snapshot
+	// etcd-raft 模块通过返回 Ready 实例与上层模块进行交互，
+	// 其中 Ready.Message 字段记录了待发送的消息，其中可能会包含 MsgSnap 类型的消息，
+	// 该类型消息中封装了需要发送到其他节点的快照数据。当 raftNode 收到 MsgSnap 消息之后，
+	// 会将其写入 msgSnapC 通道中，并等待上层模块进行发送。
 	msgSnapC chan raftpb.Message
 
 	// a chan to send out apply
+	// 在 etcd-raft 模块返回的 Ready 实例中，除了封装了待持久化的 Entry 记录和待持久化的快照数据，
+	// 还封装了待应用的 Entry 记录。raftNode 会将待应用的记录和快照数据封装成 apply 实例，
+	// 之后写入 applyc 通道等待上层模块处理。
 	applyc chan apply
 
 	// a chan to send out readState
+	// Readyc.ReadStates 中封装了只读请求相关的 ReadStat 实例，其中的最后一项将会被写入 readStateC 通道中等待上层模块处理。
 	readStateC chan raft.ReadState
 
 	// utility
+	// 该定时器就是逻辑时钟，每触发一次就会推进一次底层的选举计时器和心跳计时器。
 	ticker *time.Ticker
 	// contention detectors for raft heartbeat message
+	// 检测发往同一节点的两次心跳消息是否超时，如果超时，则会打印相关警告信息。
 	td *contention.TimeoutDetector
 
 	stopped chan struct{}
 	done    chan struct{}
 }
 
+// 结构体 raftNode 中内嵌了 raftNodeConfig，而在结构体 raftNodeConfig 中又内嵌了 etcd-raft 模块中的 Node。
+// 这样 raftNode 实例就可以与 etcd-raft 模块完成交互。
 type raftNodeConfig struct {
 	lg *zap.Logger
 
 	// to check if msg receiver is removed from cluster
+	// 该函数用来检测指定节点是否已经被移出当前集群。
 	isIDRemoved func(id uint64) bool
 	raft.Node
+	// 与 raftLog.storage 字段指向的 MemoryStorage 为同一实例，主要用来保存持久化的 Entry 记录和快照数据。
 	raftStorage *raft.MemoryStorage
-	storage     Storage
-	heartbeat   time.Duration // for logging
+	// 注意该字段的类型，在etcd-raft模块中有一个与之同名的接口（raft.Storage接口）,
+	// MemoryStorage 就是 raft.Storage 接口的实现之一。
+	storage Storage
+	// 逻辑时钟的刻度
+	heartbeat time.Duration // for logging
 	// transport specifies the transport to send and receive msgs to members.
 	// Sending messages MUST NOT block. It is okay to drop messages, since
 	// clients should timeout and reissue their messages.
 	// If transport is nil, server will panic.
+	// 通过网络将消息发送到集群中其他节点
 	transport rafthttp.Transporter
 }
 

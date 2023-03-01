@@ -42,6 +42,9 @@ func (op *ReadDirOp) applyOpts(opts []ReadDirOption) {
 
 // ReadDir returns the filenames in the given directory in sorted order.
 func ReadDir(d string, opts ...ReadDirOption) ([]string, error) {
+	// 暂时不理解这种写法呢，可以传入多个配置，但是这个 op 最后还是一个 ext ?
+	// 一个猜测，这样可以实现函数重载？
+	// 就是可以传 0 个或者 1 个后缀
 	op := &ReadDirOp{}
 	op.applyOpts(opts)
 

@@ -115,17 +115,25 @@ type streamWriter struct {
 	lg *zap.Logger
 
 	localID types.ID
-	peerID  types.ID
+	// 对端节点的ID。
+	peerID types.ID
 
 	status *peerStatus
 	fs     *stats.FollowerStats
-	r      Raft
 
-	mu      sync.Mutex // guard field working and closer
-	closer  io.Closer
+	//底层的Raft实例。
+	r Raft
+
+	mu sync.Mutex // guard field working and closer
+	// 负责关闭底层的长连接。
+	closer io.Closer
+	//负责标识当前的 streamWriter 是否可用（底层是否关联了相应的网络连接）。
 	working bool
 
-	msgc  chan raftpb.Message
+	// Peer会将待发送的消息写入该通道，streamWriter 则从该通道中读取消息并发送出去。
+	msgc chan raftpb.Message
+	// 通过该通道获取当前 streamWriter 实例关联的底层网络连接，outgoingConn 其实是对网络连接的一层封装，
+	// 其中记录了当前连接使用的协议版本，以及用于关闭连接的Flusher和Closer等信息。
 	connc chan *outgoingConn
 	stopc chan struct{}
 	done  chan struct{}
@@ -152,6 +160,17 @@ func startStreamWriter(lg *zap.Logger, local, id types.ID, status *peerStatus, f
 	return w
 }
 
+// run() 方法中，主要完成了下面三件事情：
+//（1）当其他节点主动与当前节点创建连接（即Stream消息通道底层使用的网络连接）时，该连接实例会写入对应peer.writer.connc通道，在streamWriter.run()方法中会通过该通道获取该连接实例并进行绑定，之后才能开始后续的消息发送。
+//（2）定时发送心跳消息，该心跳消息并不是前面介绍etcd-raft模块时提到的MsgHeartbeat消息，而是为了防止底层连接超时的消息，后面会详细介绍该消息的处理过程。
+//（3）发送除心跳消息外的其他类型的消息。
+//
+// msgc chan raftpb.Message  // 指向当前streamWriter.msgc字段
+// 定时器会定时向该通道发送信号，触发心跳消息的发送，该心跳消息与Raft的心跳消息有所不同，该心跳消息的主要目的是为了防止连接长时间不用断开的
+// t streamType   // 用来记录消息的版本信息
+// enc encoder    // 编码器，负责将消息序列化并写入连接的缓冲区
+// flusher http.Flusher // 负责刷新底层连接，将数据真正发送出去
+// batched int         // 当前未Flush的消息个数
 func (cw *streamWriter) run() {
 	var (
 		msgc       chan raftpb.Message
@@ -161,8 +180,11 @@ func (cw *streamWriter) run() {
 		flusher    http.Flusher
 		batched    int
 	)
+	// 发送心跳消息的定时器
 	tickc := time.NewTicker(ConnReadTimeout / 3)
 	defer tickc.Stop()
+
+	// 未 Flush 的字节数
 	unflushed := 0
 
 	if cw.lg != nil {
@@ -173,6 +195,7 @@ func (cw *streamWriter) run() {
 		)
 	}
 
+	//
 	for {
 		select {
 		case <-heartbeatc:
