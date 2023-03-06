@@ -80,6 +80,11 @@ func newRevBytes() []byte {
 }
 
 func revToBytes(rev revision, bytes []byte) {
+	// 大端序（Big-Endian）：最重要的数字存储在最低地址（最左边）处
+	// 小端序（Little-Endian）: 最不重要的数字存储在最低地址处
+	// 在网络上传输一般采用大端序，所以大端序也称为网络序
+
+	// uint64/int64 占用8个字节
 	binary.BigEndian.PutUint64(bytes, uint64(rev.main))
 	bytes[8] = '_'
 	binary.BigEndian.PutUint64(bytes[9:], uint64(rev.sub))

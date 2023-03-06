@@ -332,6 +332,9 @@ func (a *applierV3backend) DeleteRange(txn mvcc.TxnWrite, dr *pb.DeleteRangeRequ
 // Range 在 applierV3backend 中实现时，首先准备分页的大小，多取一个，用于判断分页是否存在下一页。
 // 随后构造 Range 请求，调用 mvcc 包中的 Range 方法获取结果，最后对结果进行排序并将结果返回给客户端，
 // 由于当前的 mvcc.Range 实现返回按字典序升序的结果，因此默认情况下仅当目标不是KEY时才进行升序排序。
+//
+// -> metricsTxnWrite.Range()
+// -> storeTxnRead.Range()
 func (a *applierV3backend) Range(ctx context.Context, txn mvcc.TxnRead, r *pb.RangeRequest) (*pb.RangeResponse, error) {
 
 	trace := traceutil.Get(ctx)

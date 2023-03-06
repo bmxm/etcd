@@ -140,6 +140,9 @@ func (s *EtcdServer) Range(ctx context.Context, r *pb.RangeRequest) (*pb.RangeRe
 	}
 
 	// 查询结果
+	// -> applierV3backend.Range()
+	// -> metricsTxnWrite.Range()
+	// -> storeTxnRead.Range()
 	get := func() { resp, err = s.applyV3Base.Range(ctx, nil, r) }
 	if serr := s.doSerialize(ctx, chk, get); serr != nil {
 		err = serr

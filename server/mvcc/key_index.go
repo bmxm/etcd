@@ -78,6 +78,10 @@ type keyIndex struct {
 	// 所以每个 Key 值至少对应一个generation实例（如果没有，则表示当前Key值应该被删除），
 	// 每代中包含多个revision信息。当客户端后续不断修改该Key时，generation[0]中会不断追加revision信息
 	generations []generation // generation保存了一个key若干代版本号信息，每代中包含对key的多次修改的版本号列表
+
+	// generations 表示一个 key 从创建到删除的过程，每代对应 key 的一个生命周期的开始与结束。
+	// 当你第一次创建一个 key 时，会生成第 0 代，后续的修改操作都是在往第 0 代中追加修改版本号。
+	// 当你把 key 删除后，它就会生成新的第 1 代，一个 key 不断经历创建、删除的过程，它就会生成多个代。
 }
 
 // backend store 实现了多版本的机制，也就时键值对的每一次更新操作都被单独记录下来了。

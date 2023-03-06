@@ -57,6 +57,10 @@ func (s *kvServer) Range(ctx context.Context, r *pb.RangeRequest) (*pb.RangeResp
 
 	// Range 请求的主要部分在于调用 RaftKV.Range()方法。这将会调用到 etcdserver 包中对 RaftKV 的实现：
 	// 这里执行的是 v3_server.go 中的 EtcdServer 对象的 Range 方法
+	// -> EtcdServer.Range()
+	// -> applierV3backend.Range()
+	// -> metricsTxnWrite.Range()
+	// -> storeTxnRead.Range()
 	resp, err := s.kv.Range(ctx, r)
 	if err != nil {
 		return nil, togRPCError(err)

@@ -40,7 +40,11 @@ type index interface {
 }
 
 // treeIndex 中，每个节点的 key 是一个 keyIndex 结构，etcd 通过它保存了key 与版本号的映射关系。
-// treeIndex 是v3版本存储提供的index接口实现，其中内嵌了sync.RWMutex，在进行更新操作时，例如，Insert()、Compact()方法中，都需要获取该锁。
+// treeIndex 是v3版本存储提供的index接口实现，其中内嵌了sync.RWMutex，在进行更新操作时，
+// 例如，Insert()、Compact()方法中，都需要获取该锁。
+//
+// 在 etcd treeIndex 模块中，创建的是最大度 32 的 B-tree，也就是一个叶子节点最多可以保存 63 个 key。
+// (在一个度为 d 的 B-tree 中，节点保存的最大 key 数为 2d - 1，否则需要进行平衡、分裂操作。)
 type treeIndex struct {
 	sync.RWMutex
 	tree *btree.BTree

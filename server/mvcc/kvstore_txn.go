@@ -171,6 +171,8 @@ func (tr *storeTxnRead) rangeKeys(ctx context.Context, key, end []byte, curRev i
 		default:
 		}
 		revToBytes(revpair, revBytes)
+
+		// -> baseReadTx.UnsafeRange()
 		_, vs := tr.tx.UnsafeRange(buckets.Key, revBytes, nil, 0)
 		if len(vs) != 1 {
 			tr.s.lg.Fatal(
