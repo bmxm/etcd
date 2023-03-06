@@ -88,11 +88,28 @@ func (s *kvServer) Put(ctx context.Context, r *pb.PutRequest) (*pb.PutResponse, 
 	return resp, nil
 }
 
+// DeleteRange grpc 请求的第一层函数
+//
+// etcd 实现的是延期删除模式，原理与 key 更新类似。与更新 key 不一样之处在于，
+//	一方面，生成的 boltdb key 版本号{4,0,t}追加了删除标识（tombstone, 简写 t），boltdb value 变成只含用户 key 的 KeyValue 结构体。
+//	另一方面 treeIndex 模块也会给此 key hello 对应的 keyIndex 对象，追加一个空的 generation 对象，表示此索引对应的 key 被删除了。
+//
+// 那么 key 打上删除标记后有哪些用途呢？什么时候会真正删除它呢？
+//	一方面删除 key 时会生成 events，Watch 模块根据 key 的删除标识，会生成对应的 Delete 事件。
+//	另一方面，当你重启 etcd，遍历 boltdb 中的 key 构建 treeIndex 内存树时，你需要知道哪些 key 是已经被删除的，并为对应的 key 索引生成 tombstone 标识。
+//	而真正删除 treeIndex 中的索引对象、boltdb 中的 key 是通过压缩 (compactor) 组件异步完成。
+//
+//	正因为 etcd 的删除 key 操作是基于以上延期删除原理实现的，因此只要压缩组件未回收历史版本，我们就能从 etcd 中找回误删的数据。
+//
+// etcd采用延迟删除:，
+// 	1是为了保证 key 对应的 watcher 能够获取到 key 的所有状态信息，留给 watcher 时间做相应的处理。
+//	2是实时从 boltdb 删除 key，会可能触发树的不平衡，影响其他读写请求的性能。
 func (s *kvServer) DeleteRange(ctx context.Context, r *pb.DeleteRangeRequest) (*pb.DeleteRangeResponse, error) {
 	if err := checkDeleteRequest(r); err != nil {
 		return nil, err
 	}
 
+	// v3_server.go -> EtcdServer.DeleteRange()
 	resp, err := s.kv.DeleteRange(ctx, r)
 	if err != nil {
 		return nil, togRPCError(err)

@@ -101,10 +101,22 @@ type keyIndex struct {
 // 再以版本号作为 boltdb key，以用户的 key-value 等信息作为 boltdb value，保存到 boltdb
 
 // !!!
-// boltdb 中只能通过reversion来查询数据,但是客户端都是通过 key 来查询的。所以 etcd 在内存中使用 treeIndex 模块 维护了一个kvindex,保存的就是 key-reversion 之间的映射关系，用来加速查询
+// boltdb 中只能通过reversion来查询数据,但是客户端都是通过 key 来查询的。
+// 所以 etcd 在内存中使用 treeIndex 模块 维护了一个kvindex,保存的就是 key-reversion 之间的映射关系，用来加速查询
 
 // put puts a revision to the keyIndex.
-// 该方法负责向keyIndex中追加新的revision信息
+// 该方法负责向 keyIndex 中追加新的 revision 信息
+//
+// 观察到一个现象：
+// 如果程序运行到该函数时，强制停止该程序，重新启动后会自动再次走到这里，应该是 raft 的功劳 ？
+// 也可能只是简单的恢复数据？因为走的是 kvstore.go 中的 restoreIntoIndex() 函数
+//
+// 一个 put 操作完成，此时数据一般还未持久化，为了提升 etcd 的写吞吐量、性能，
+// 一般情况下（默认堆积的写事务数大于 1 万才在写事务结束时同步持久化），
+// 数据持久化由 Backend 的异步 goroutine 完成，它通过事务批量提交，
+// 定时将 boltdb 页缓存中的脏数据提交到持久化存储磁盘中。
+// ---
+// 如果此时 etcd 挂了也没问题，重启时会重放 wal日志中已提交的日志条目再次执行。
 func (ki *keyIndex) put(lg *zap.Logger, main int64, sub int64) {
 	// 根据传入的main revision和sub revision创建revision实例
 	rev := revision{main: main, sub: sub}

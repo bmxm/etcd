@@ -307,6 +307,9 @@ type backendHooks struct {
 	confStateLock  sync.Mutex
 }
 
+// OnPreCommitUnsafe
+// -> consistentIndex.UnsafeSave()
+// -> batchTxBuffered.UnsafePut()
 func (bh *backendHooks) OnPreCommitUnsafe(tx backend.BatchTx) {
 	bh.indexer.UnsafeSave(tx)
 	bh.confStateLock.Lock()

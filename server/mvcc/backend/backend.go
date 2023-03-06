@@ -443,7 +443,7 @@ func (b *backend) SizeInUse() int64 {
 	return atomic.LoadInt64(&b.sizeInUse)
 }
 
-// 在backend.run()方法中，会按照batchInterval指定的时间间隔，定时提交批量读写数据，在提交之后会立即开启一个新的批量读写事务。
+// run 方法中，会按照 batchInterval 指定的时间间隔，定时提交批量读写数据，在提交之后会立即开启一个新的批量读写事务。
 func (b *backend) run() {
 	defer close(b.donec)
 

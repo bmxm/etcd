@@ -87,6 +87,8 @@ func (ci *consistentIndex) SetConsistentIndex(v uint64, term uint64) {
 func (ci *consistentIndex) UnsafeSave(tx backend.BatchTx) {
 	index := atomic.LoadUint64(&ci.consistentIndex)
 	term := atomic.LoadUint64(&ci.term)
+
+	// -> batchTxBuffered.UnsafePut()
 	UnsafeUpdateConsistentIndex(tx, index, term, true)
 }
 
@@ -172,8 +174,11 @@ func UnsafeUpdateConsistentIndex(tx backend.BatchTx, index uint64, term uint64, 
 
 	bs1 := make([]byte, 8)
 	binary.BigEndian.PutUint64(bs1, index)
+
 	// put the index into the underlying backend
 	// tx has been locked in TxnBegin, so there is no need to lock it again
+	//
+	// -> batchTxBuffered.UnsafePut()
 	tx.UnsafePut(buckets.Meta, buckets.MetaConsistentIndexKeyName, bs1)
 	if term > 0 {
 		bs2 := make([]byte, 8)

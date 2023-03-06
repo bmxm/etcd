@@ -140,6 +140,19 @@ func (t *batchTx) UnsafeSeqPut(bucket Bucket, key []byte, value []byte) {
 	t.unsafePut(bucket, key, value, true)
 }
 
+// boltdb 的 key 为版本号，value 包含用户 key-value、各种版本号、lease 的 mvccpb.KeyValue 结构体。
+//
+// 当你未带版本号查询 key 时，etcd 返回的是 key 最新版本数据。
+// 当你指定版本号读取数据时，etcd 实际上返回的是版本号生成那个时间点的快照数据。
+//
+// 删除一个数据时，etcd 并未真正删除它，而是基于 lazy delete 实现的异步删除。
+// 删除原理本质上与更新操作类似，只不过 boltdb 的 key 会打上删除标记，keyIndex 索引中追加空的 generation。
+// 真正删除 key 是通过 etcd 的压缩组件去异步实现的。
+//
+// etcd 实现了保存 key 历史版本的功能，是高可靠 Watch 机制的基础。
+// 基于 key-value 中的各种版本号信息，etcd 可提供各种级别的简易事务隔离能力。
+//
+// 基于 Backend/boltdb 提供的 MVCC 机制，etcd 可实现读写不冲突。
 func (t *batchTx) unsafePut(bucketType Bucket, key []byte, value []byte, seq bool) {
 	// 通过BoltDB提供的API获取指定的Bucket实例
 	bucket := t.tx.Bucket(bucketType.Name())
@@ -348,6 +361,10 @@ func (t *batchTxBuffered) CommitAndStop() {
 	t.Unlock()
 }
 
+// commit
+// server.go -> backendHooks.OnPreCommitUnsafe()
+// cindex.go -> consistentIndex.UnsafeSave()
+// -> batchTxBuffered.UnsafePut()
 func (t *batchTxBuffered) commit(stop bool) {
 	if t.backend.hooks != nil {
 		t.backend.hooks.OnPreCommitUnsafe(t)

@@ -6515,9 +6515,13 @@ type KVServer interface {
 	// 2. api/v3rpc/key.go: kvServer.Put(ctx context.Context, r *pb.PutRequest)
 	// 3. v3_server.EtcdServer.Put(ctx context.Context, r *pb.PutRequest)
 	Put(context.Context, *PutRequest) (*PutResponse, error)
+
 	// DeleteRange deletes the given range from the key-value store.
 	// A delete request increments the revision of the key-value store
 	// and generates a delete event in the event history for every deleted key.
+	//
+	// 1. key.go -> kvServer.DeleteRange()
+	// 2. v3_server.go -> EtcdServer.DeleteRange()
 	DeleteRange(context.Context, *DeleteRangeRequest) (*DeleteRangeResponse, error)
 	// Txn processes multiple requests in a single transaction.
 	// A txn request increments the revision of the key-value store
