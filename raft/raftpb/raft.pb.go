@@ -459,6 +459,8 @@ func (m *Message) XXX_DiscardUnknown() {
 
 var xxx_messageInfo_Message proto.InternalMessageInfo
 
+// WAL 日志记录的追加是批量的，在每次批量写入 entryType 类型的日志之后，都会再追加一条 stateType 类型的日志记录，
+// 在 HardState 中记录了当前的 Term、当前节点的投票结果和已提交日志的位置。
 type HardState struct {
 	Term   uint64 `protobuf:"varint,1,opt,name=term" json:"term"`
 	Vote   uint64 `protobuf:"varint,2,opt,name=vote" json:"vote"`

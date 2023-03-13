@@ -71,7 +71,7 @@ var (
 	crcTable                        = crc32.MakeTable(crc32.Castagnoli)
 )
 
-// etcd-raf t模块为了保证 Raft 核心协议实现的简洁，并没有直接提供WAL日志与快照相关的实现逻辑，而是将其实现独立到etcd-wal模块与etcd-snap模块，
+// etcd-raft 模块为了保证 Raft 核心协议实现的简洁，并没有直接提供WAL日志与快照相关的实现逻辑，而是将其实现独立到etcd-wal模块与etcd-snap模块，
 // 其中提供了操作WAL日志文件与快照文件的相关实现。上层模块自身调用etcd-wal模块与etcd-snap模块即可完成读写WAL日志文件与快照文件的相关操作。
 
 // WAL is a logical representation of the stable storage.
@@ -82,7 +82,7 @@ var (
 //
 // 对外提供了 WAL 日志文件管理的核心 API。
 // 在操纵WAL日志时，对应的 WAL 实例有 read 和 append 两种模式，
-// 新创建的WAL实例处于 append 模式，该模式下只能向WAL中追加日志。
+// 新创建的WAL实例处于 append 模式，该模式下只能向 WAL 中追加日志。
 // 当恢复一个节点时（例如，宕机节点的重启），就需要读取WAL日志的内容，
 // 此时刚打开的 WAL 实例处于 read 模式，它只能读取日志记录，
 // 当读取完全部的日志之后，WAL 实例转换成 append 模式，可以继续向其追加日志记录。
@@ -99,7 +99,8 @@ type WAL struct {
 	// 在每个WAL日志文件的头部，都会写入 metadata 元数据。
 	metadata []byte // metadata recorded at the head of each WAL
 
-	// WAL 日志记录的追加是批量的，在每次批量写入entryType类型的日志之后，都会再追加一条stateType类型的日志记录，在HardState中记录了当前的Term、当前节点的投票结果和已提交日志的位置。
+	// WAL 日志记录的追加是批量的，在每次批量写入 entryType 类型的日志之后，都会再追加一条 stateType 类型的日志记录，
+	// 在 HardState 中记录了当前的 Term、当前节点的投票结果和已提交日志的位置。
 	state raftpb.HardState // hardstate recorded at the head of WAL
 
 	// 每次读取WAL日志时，并不会每次都从头开始读取，而是通过这里的start字段指定具体的起始位置。
