@@ -135,6 +135,8 @@ func (tw *storeTxnWrite) End() {
 	tw.s.mu.RUnlock()
 }
 
+// etcd v3 范围查询具体实现
+// 查询的时候指定一个版本号 curRev，etcd 则从底层的 BoltDB 中读取比 curRev 更新的数据
 func (tr *storeTxnRead) rangeKeys(ctx context.Context, key, end []byte, curRev int64, ro RangeOptions) (*RangeResult, error) {
 	rev := ro.Rev
 	if rev > curRev {
@@ -143,6 +145,9 @@ func (tr *storeTxnRead) rangeKeys(ctx context.Context, key, end []byte, curRev i
 	if rev <= 0 {
 		rev = curRev
 	}
+
+	// 先判断 curRev 的数据是否都已经被删除了。
+	// etcd会定期将老版本的数据进行垃圾回收，因此如果curRev小于上一次垃圾回收的版本号tr.s.compactMainRev，则直接返回错误。否则就从内存的索引中查询到该key大于curRev的版本号，再去BoltDB中读取数据，返回给客户端即可。
 	if rev < tr.s.compactMainRev {
 		return &RangeResult{KVs: nil, Count: -1, Rev: 0}, ErrCompacted
 	}

@@ -269,6 +269,7 @@ func (DowngradeRequest_DowngradeAction) EnumDescriptor() ([]byte, []int) {
 	return fileDescriptor_77a6da22d6a3feb1, []int{57, 0}
 }
 
+// etcd v3 的请求响应的header数据结构
 type ResponseHeader struct {
 	// cluster_id is the ID of the cluster which sent the response.
 	ClusterId uint64 `protobuf:"varint,1,opt,name=cluster_id,json=clusterId,proto3" json:"cluster_id,omitempty"`

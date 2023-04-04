@@ -35,6 +35,19 @@ import (
 	"go.uber.org/zap"
 )
 
+// etcd-raft 模块为了保证Raft核心协议实现的简洁，并没有直接提供WAL日志与快照相关的实现逻辑，
+// 而是将其实现独立到 etcd-wal 模块与 etcd-snap 模块，其中提供了操作WAL日志文件与快照文件的相关实现。
+// 上层模块自身调用etcd-wal模块与etcd-snap模块即可完成读写WAL日志文件与快照文件的相关操作。
+
+// WAL（Write-ahead logging）是etcd实现一致性的重要手段之一。
+// 下面是处理一条 Entry 记录的大致流程：
+//（1）当客户端向 etcd 集群发送了一次请求之后，请求中的封装 Entry 记录会先被交给etcd-raft模块进行处理，其中，etcd-raft模块会先将Entry记录保存到raftLog.unstable中。
+//（2）etcd-raft模块将该Entry记录封装到前面介绍的Ready实例中，返回给上层模块进行持久化。
+//（3）当上层模块收到待持久化的Entry记录之后，会先将其记录到WAL日志文件中，然后进行持久化操作，最后通知etcd-raft模块进行处理。
+//（4）此时etcd-raft模块就会将该Entry记录从unstable移动到storage中保存。
+//（5）待该Entry记录被复制到集群中的半数以上节点时，该Entry记录会被Leader节点确认为已提交（committed），并封装进Ready实例返回给上层模块。
+//（6）此时上层模块即可将该Ready实例中携带的待应用Entry记录应用到状态机中。
+
 const (
 	// metadataType: 该类型日志记录的 Data 字段中保存了一些元数据，在每个WAL文件的开头，都会记录一条metadataType类型的日志记录。
 	// entryType: 该类型日志记录的Data字段中保存的是Entry记录，也就是客户端发送给服务端处理的数据，例如，raftexample示例中客户端发送的键值对数据。
@@ -71,6 +84,29 @@ var (
 	crcTable                        = crc32.MakeTable(crc32.Castagnoli)
 )
 
+// WAL 类似于 MySQL 的 binlog。
+// 该日志中记录着每次修改数据的指令和修改任期，并通过 Log index 标注了当前是第几条日志，以此作为同步进度的依据。
+
+// 其中，Leader 的日志永远不会被删除，所有的 Follower 都会保持和 Leader 完成一致，如果存在差异也会被强制覆盖。
+// 同时，每个日志都有"写入"和"commit"两个阶段，在选举时，每个服务会根据还未 commit 的 Log index 进度优先选择同步进度最大的节点，以此保证选举出的 Leader 拥有最全的数据。
+// Leader 在任期内向各节点发送同步请求，其实就是按顺序向各节点推送一条条日志。如果 Leader 同步的进度比 Follower 超前，Follower 就会拒绝本次同步。
+// Leader 收到拒绝后，会从后往前一条条找出日志中还未同步的部分或者有差异的部分，然后开始一个个往后覆盖实现同步。
+
+// Leader 和 Follower 的日志同步进度是通过日志 index 来确认的。Leader 对日志内容和顺序有绝对的决策权，当它发现自己的日志和 Follower 的日志有差异时，为了确保多个副本的数据是完全一致的，它会强制覆盖 Follower 的日志。
+//
+// 那么 Leader 是怎么识别出 Follower 的日志与自己的日志有没有差异呢？实际上，Leader 给 Follower 同步日志的时候，会同时带上 Leader 上一条日志的任期和索引号，与 Follower 当前的同步进度进行对比。
+// 对比分为两个方面：一方面是对比 Leader 和 Follower 当前日志中的 index、多条操作日志和任期；另一方面是对比 Leader 和 Follower 上一条日志的 index 和任期。
+// 如果有任意一个不同，那么 Leader 就认为 Follower 的日志与自己的日志不一致，这时候 Leader 会一条条倒序往回对比，直到找到日志内容和任期完全一致的 index，然后从这个 index 开始正序向下覆盖。
+// 同时，在日志数据同步期间，Leader 只会 commit 其所在任期内的数据，过往任期的数据完全靠日志同步倒序追回。
+//
+// 这样一条条推送同步有些缓慢，效率不高，这导致 Raft 对新启动的服务不是很友好。所以 Leader 会定期打快照，通过快照合并之前修改日志的记录，来降低修改日志的大小。
+// 而同步进度差距过大的 Follower 会从 Leader 最新的快照中恢复数据，按快照最后的 index 追赶进度。
+
+// 如何保证读取数据的强一致性？
+// 那从 Follower 的角度来看，它怎么保证自己对外提供的数据是最新的呢？这里有个小技巧，就是 Follower 在收到查询请求时，会顺便问一下 Leader 当前最新 commit 的 log index 是什么。
+// 如果这个 log index 大于当前 Follower 同步的进度，就说明 Follower 的本地数据不是最新的，这时候 Follower 就会从 Leader 获取最新的数据返回给客户端。可见，保证数据强一致性的代价很大。
+//
+
 // etcd-raft 模块为了保证 Raft 核心协议实现的简洁，并没有直接提供WAL日志与快照相关的实现逻辑，而是将其实现独立到etcd-wal模块与etcd-snap模块，
 // 其中提供了操作WAL日志文件与快照文件的相关实现。上层模块自身调用etcd-wal模块与etcd-snap模块即可完成读写WAL日志文件与快照文件的相关操作。
 
@@ -81,11 +117,14 @@ var (
 // The WAL will be ready for appending after reading out all the previous records.
 //
 // 对外提供了 WAL 日志文件管理的核心 API。
-// 在操纵WAL日志时，对应的 WAL 实例有 read 和 append 两种模式，
-// 新创建的WAL实例处于 append 模式，该模式下只能向 WAL 中追加日志。
+// 在操纵 WAL 日志时，对应的 WAL 实例有 read 和 append 两种模式，
+// 新创建的 WAL 实例处于 append 模式，该模式下只能向 WAL 中追加日志。
 // 当恢复一个节点时（例如，宕机节点的重启），就需要读取WAL日志的内容，
 // 此时刚打开的 WAL 实例处于 read 模式，它只能读取日志记录，
 // 当读取完全部的日志之后，WAL 实例转换成 append 模式，可以继续向其追加日志记录。
+//
+// 在 WAL 日志文件中，日志记录是通过 Record 表示的，该结构体通过 Protocol Buffers 生成，
+// 主要用于序列化和反序列化日志记录
 type WAL struct {
 	lg *zap.Logger
 
@@ -126,7 +165,7 @@ type WAL struct {
 	// 当前WAL实例管理的所有WAL日志文件对应的句柄。
 	locks []*fileutil.LockedFile // the locked files the WAL holds (the name is increasing)
 
-	//filePipeline实例负责创建新的临时文件。
+	// filePipeline 实例负责创建新的临时文件。
 	fp *filePipeline
 }
 
